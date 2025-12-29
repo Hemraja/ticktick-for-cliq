@@ -1,0 +1,503 @@
+
+// FORM SUBMIT HANDLER: tickflowviewtaskdetailssubmit
+// Deluge-safe, copy-paste ready: show task details from DB, enrich from TickTick API, fallback to taskmeta.
+formValues = form.get("values");
+actionType = form.get("action");
+// 0) Handle cancel
+if(actionType == "cancel")
+{
+	response = {"text":"Closed task details view.","card":{"title":"TickFlow","theme":"prompt"}};
+	return response;
+}
+// 1) Get selected task id (handles select map or raw value)
+taskId = "";
+if(formValues != null && formValues.containKey("task") && formValues.get("task") != null)
+{
+	taskField = formValues.get("task");
+	try 
+	{
+		if(taskField.containKey("value") && taskField.get("value") != null)
+		{
+			taskId = taskField.get("value").toString();
+		}
+		else
+		{
+			taskId = taskField.toString();
+		}
+	}
+	catch (e1)
+	{
+		taskId = taskField.toString();
+	}
+}
+if(taskId == null || taskId == "")
+{
+	response = {"text":"⚠️ No task selected.","card":{"title":"TickFlow","theme":"prompt"}};
+	return response;
+}
+info "tickflowviewtaskdetailssubmit → taskId: " + taskId;
+// 2) Load user's DB rows
+uidStr = user.get("id");
+if(uidStr == null || uidStr == "")
+{
+	response = {"text":"❌ Could not identify user.","card":{"title":"TickFlow","theme":"prompt"}};
+	return response;
+}
+query = Map();
+query.put("criteria","userid == " + uidStr);
+tdb = zoho.cliq.getRecords("tickflowdb",query);
+info "tickflowviewtaskdetailssubmit → DB response:";
+info tdb;
+if(tdb == null || !tdb.containKey("status") || tdb.get("status") != "SUCCESS" || !tdb.containKey("list") || tdb.get("list") == null)
+{
+	response = {"text":"❌ Could not load tasks.","card":{"title":"TickFlow","theme":"prompt"}};
+	return response;
+}
+// 3) Find the requested DB record
+trec = null;
+for each  row in tdb.get("list")
+{
+	if(row != null && row.containKey("taskid") && row.get("taskid") != null)
+	{
+		if(row.get("taskid").toString() == taskId)
+		{
+			trec = row;
+			break;
+		}
+	}
+}
+if(trec == null)
+{
+	response = {"text":"❌ Task not found in DB.","card":{"title":"TickFlow","theme":"prompt"}};
+	return response;
+}
+info "tickflowviewtaskdetailssubmit → found db id: " + trec.get("id");
+// 4) Extract base fields from DB (safe reads)
+tname = "";
+projName = "";
+dueText = "";
+remText = "";
+subsText = "";
+taskMeta = "";
+projIdFromDb = "";
+if(trec.containKey("tasktitle") && trec.get("tasktitle") != null)
+{
+	tname = trec.get("tasktitle").toString();
+}
+if(trec.containKey("projectname") && trec.get("projectname") != null)
+{
+	projName = trec.get("projectname").toString();
+}
+if(projName == null || projName == "")
+{
+	projName = "Inbox";
+}
+if(trec.containKey("duedate") && trec.get("duedate") != null)
+{
+	dueText = trec.get("duedate").toString();
+}
+if(trec.containKey("reminders") && trec.get("reminders") != null)
+{
+	remText = trec.get("reminders").toString();
+}
+if(trec.containKey("subtasks") && trec.get("subtasks") != null)
+{
+	subsText = trec.get("subtasks").toString();
+}
+if(trec.containKey("taskmeta") && trec.get("taskmeta") != null)
+{
+	taskMeta = trec.get("taskmeta").toString();
+}
+if(trec.containKey("projectid") && trec.get("projectid") != null)
+{
+	projIdFromDb = trec.get("projectid").toString();
+}
+info "tickflowviewtaskdetailssubmit → projIdFromDb: " + projIdFromDb;
+// 5) Try to enrich from TickTick API (project endpoint first, fallback to /task)
+apiOk = false;
+apiResp = null;
+baseUrl = "https://api.ticktick.com/open/v1";
+if(projIdFromDb != null && projIdFromDb != "")
+{
+	try 
+	{
+		apiResp = invokeurl
+		[
+			url :baseUrl + "/project/" + projIdFromDb + "/task/" + taskId
+			type :GET
+			connection:"ticktick_oauth"
+		];
+		info "tickflowviewtaskdetailssubmit → /project/.../task resp:";
+		info apiResp;
+		apiOk = true;
+	}
+	catch (apiE1)
+	{
+		info "tickflowviewtaskdetailssubmit → project GET failed:";
+		info apiE1;
+		apiOk = false;
+	}
+}
+if(apiOk == false)
+{
+	try 
+	{
+		apiResp = invokeurl
+		[
+			url :baseUrl + "/task/" + taskId
+			type :GET
+			connection:"ticktick_oauth"
+		];
+		info "tickflowviewtaskdetailssubmit → /task resp:";
+		info apiResp;
+		apiOk = true;
+	}
+	catch (apiE2)
+	{
+		info "tickflowviewtaskdetailssubmit → /task GET failed:";
+		info apiE2;
+		apiOk = false;
+	}
+}
+// 6) Override DB values with API where available
+if(apiOk == true && apiResp != null)
+{
+	try 
+	{
+		if(apiResp.containKey("title") && apiResp.get("title") != null)
+		{
+			tname = apiResp.get("title").toString();
+		}
+	}
+	catch (x1)
+	{
+	}
+	try 
+	{
+		if(apiResp.containKey("dueDate") && apiResp.get("dueDate") != null)
+		{
+			dueText = apiResp.get("dueDate").toString();
+		}
+	}
+	catch (x2)
+	{
+	}
+	try 
+	{
+		if(apiResp.containKey("reminders") && apiResp.get("reminders") != null)
+		{
+			rlist = apiResp.get("reminders");
+			remJoined = "";
+			for each  r in rlist
+			{
+				if(r != null)
+				{
+					rstr = r.toString();
+					if(remJoined == "")
+					{
+						remJoined = rstr;
+					}
+					else
+					{
+						remJoined = remJoined + ", " + rstr;
+					}
+				}
+			}
+			if(remJoined != "")
+			{
+				remText = remJoined;
+			}
+		}
+	}
+	catch (x3)
+	{
+	}
+	try 
+	{
+		if(apiResp.containKey("items") && apiResp.get("items") != null)
+		{
+			itemsArr = apiResp.get("items");
+			itemsBlock = "";
+			for each  it in itemsArr
+			{
+				if(it != null && it.containKey("title") && it.get("title") != null)
+				{
+					itTitle = it.get("title").toString();
+					if(itemsBlock == "")
+					{
+						itemsBlock = itTitle;
+					}
+					else
+					{
+						itemsBlock = itemsBlock + "\n" + itTitle;
+					}
+				}
+			}
+			if(itemsBlock != "")
+			{
+				subsText = itemsBlock;
+			}
+		}
+	}
+	catch (x4)
+	{
+	}
+}
+// 7) Fallback parse from taskMeta if fields are still empty
+if((dueText == null || dueText == "" || dueText == "(none)") && taskMeta != null && taskMeta != "")
+{
+	idxDue = taskMeta.indexOf("Due:");
+	if(idxDue != -1)
+	{
+		idxLineEnd = taskMeta.indexOf("\n",idxDue);
+		if(idxLineEnd == -1)
+		{
+			idxLineEnd = taskMeta.length();
+		}
+		dueLine = taskMeta.subString(idxDue,idxLineEnd);
+		colPos = dueLine.indexOf(":");
+		if(colPos != -1 && colPos + 1 < dueLine.length())
+		{
+			parsed = dueLine.subString(colPos + 1,dueLine.length()).trim();
+			if(parsed != "")
+			{
+				dueText = parsed;
+			}
+		}
+	}
+}
+if((remText == null || remText == "" || remText == "(none)") && taskMeta != null && taskMeta != "")
+{
+	idxRem = taskMeta.indexOf("Reminders:");
+	if(idxRem != -1)
+	{
+		idxLineEnd2 = taskMeta.indexOf("\n",idxRem);
+		if(idxLineEnd2 == -1)
+		{
+			idxLineEnd2 = taskMeta.length();
+		}
+		remLine = taskMeta.subString(idxRem,idxLineEnd2);
+		colPos2 = remLine.indexOf(":");
+		if(colPos2 != -1 && colPos2 + 1 < remLine.length())
+		{
+			parsedRem = remLine.subString(colPos2 + 1,remLine.length()).trim();
+			if(parsedRem != "")
+			{
+				remText = parsedRem;
+			}
+		}
+	}
+}
+if((subsText == null || subsText == "" || subsText == "(none)") && taskMeta != null && taskMeta != "")
+{
+	idxSub = taskMeta.indexOf("Subtasks:");
+	if(idxSub != -1)
+	{
+		startIdx = idxSub + "Subtasks:".length();
+		if(startIdx < taskMeta.length())
+		{
+			subsBlock = taskMeta.subString(startIdx,taskMeta.length());
+			parsedSubs = subsBlock.trim();
+			if(parsedSubs != "")
+			{
+				subsText = parsedSubs;
+			}
+		}
+	}
+}
+// ----------------- DUE DATE FORMATTING BLOCK (REPLACED) -----------------
+// This block understands:
+//  - JSON-like {"date_time":"2025-12-02T09:00","time_zone_id":"Asia/Kolkata"}
+//  - ISO with offset like "2025-12-13T04:00:00.000+0000"
+//  - plain "yyyy-MM-dd HH:mm"
+// It outputs a human-friendly string in dd MMM yyyy, hh:mm a IST (or raw fallback).
+dueDisplay = "(none)";
+if(dueText != null && dueText != "")
+{
+	formatted = "";
+	// 1) Handle JSON-like object: {"date_time":"2025-12-02T09:00","time_zone_id":"Asia/Kolkata"}
+	try 
+	{
+		txtTrim = dueText.toString().trim();
+		if(txtTrim.startsWith("{") && txtTrim.endsWith("}"))
+		{
+			try 
+			{
+				dm = txtTrim.toMap();
+				if(dm.containKey("date_time") && dm.get("date_time") != null)
+				{
+					dtStr = dm.get("date_time").toString().trim();
+					tzId = "";
+					if(dm.containKey("time_zone_id") && dm.get("time_zone_id") != null)
+					{
+						tzId = dm.get("time_zone_id").toString();
+					}
+					// try parse "yyyy-MM-dd'T'HH:mm"
+					try 
+					{
+						dt = dtStr.toTime("yyyy-MM-dd'T'HH:mm");
+						tzLabel = "UTC";
+						if(tzId != null && tzId != "")
+						{
+							if(tzId.toLowerCase().indexOf("kolkata") != -1 || tzId.toLowerCase().indexOf("india") != -1)
+							{
+								tzLabel = "IST";
+							}
+							else
+							{
+								tzLabel = tzId;
+							}
+						}
+						formatted = dt.toString("dd MMM yyyy, hh:mm a") + " " + tzLabel;
+					}
+					catch (pE)
+					{
+						formatted = dtStr;
+					}
+				}
+			}
+			catch (mapE)
+			{
+				formatted = "";
+			}
+		}
+	}
+	catch (eJSON)
+	{
+		formatted = "";
+	}
+	// 2) If we didn't get formatted above, try ISO with timezone offset or plain "yyyy-MM-dd HH:mm"
+	if(formatted == "" || formatted == null)
+	{
+		try 
+		{
+			if(dueText.indexOf("T") != -1 && (dueText.indexOf("+") != -1 || dueText.indexOf("-") != -1))
+			{
+				try 
+				{
+					dt = dueText.toTime("yyyy-MM-dd'T'HH:mm:ssZ");
+					formatted = dt.toString("dd MMM yyyy, hh:mm a") + " IST";
+				}
+				catch (eIso)
+				{
+					try 
+					{
+						dt = dueText.toTime("yyyy-MM-dd'T'HH:mm");
+						formatted = dt.toString("dd MMM yyyy, hh:mm a") + " IST";
+					}
+					catch (eIso2)
+					{
+						formatted = dueText;
+					}
+				}
+			}
+			else
+			{
+				try 
+				{
+					dt2 = dueText.toTime("yyyy-MM-dd HH:mm");
+					formatted = dt2.toString("dd MMM yyyy, hh:mm a") + " IST";
+				}
+				catch (ePlain)
+				{
+					formatted = dueText;
+				}
+			}
+		}
+		catch (eFinal)
+		{
+			formatted = dueText;
+		}
+	}
+	if(formatted != null && formatted != "")
+	{
+		dueDisplay = formatted;
+	}
+}
+// ----------------- END DUE DATE FORMATTING -----------------
+// 9) Build numbered subtasks list (up to 10 lines) — no while/split
+subtasksPretty = "";
+if(subsText != null && subsText != "")
+{
+	tmp = subsText;
+	linesList = list();
+	nums = list();
+	nums.add(1);
+	nums.add(2);
+	nums.add(3);
+	nums.add(4);
+	nums.add(5);
+	nums.add(6);
+	nums.add(7);
+	nums.add(8);
+	nums.add(9);
+	nums.add(10);
+	for each  num in nums
+	{
+		if(tmp == null || tmp == "")
+		{
+			break;
+		}
+		idxN = tmp.indexOf("\n");
+		if(idxN != -1)
+		{
+			ln = tmp.subString(0,idxN).toString().trim();
+			tmp = tmp.subString(idxN + 1,tmp.length()).toString();
+		}
+		else
+		{
+			ln = tmp.toString().trim();
+			tmp = "";
+		}
+		if(ln != null && ln != "")
+		{
+			linesList.add(ln);
+		}
+	}
+	k = 1;
+	for each  l in linesList
+	{
+		if(subtasksPretty == "")
+		{
+			subtasksPretty = k.toString() + ". " + l.toString() + "\n";
+		}
+		else
+		{
+			subtasksPretty = subtasksPretty + k.toString() + ". " + l.toString() + "\n";
+		}
+		k = k + 1;
+	}
+}
+// 10) Compose final pretty message and return
+details = "";
+details = details + "✨ *Task details* ✨\n\n";
+if(tname == null || tname == "")
+{
+	tname = "(untitled)";
+}
+details = details + "📌 *Task*: " + tname + "\n";
+details = details + "📁 *Project*: " + projName + "\n";
+if(remText != null && remText != "")
+{
+	details = details + "📅 *Due*: " + dueDisplay + "\n";
+}
+else
+{
+	details = details + "📅 *Due* (none)\n";
+}
+details = details + "\n---\n";
+if(subtasksPretty != null && subtasksPretty != "")
+{
+	details = details + "*Subtasks:*\n" + subtasksPretty;
+}
+else if(subsText != null && subsText != "")
+{
+	details = details + "*Subtasks:*\n" + subsText + "\n";
+}
+else
+{
+	details = details + "*Subtasks:* (none)\n";
+}
+response = {"text":details,"card":{"title":"TickFlow – Task Details","theme":"prompt"}};
+return response;
+

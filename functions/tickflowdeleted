@@ -1,0 +1,317 @@
+
+// FUNCTION: tickflowdeletetask
+// TYPE: Widget Button Function
+// Deletes a TickTick task (works for project tasks and Inbox tasks)
+// If DB has no projectId, will attempt a project-delete with the fallbackProjectId.
+baseUrl = "https://api.ticktick.com/open/v1";
+fallbackProjectId = "6226ff9877acee87727f6bca";
+// 1) Get taskId from the button target
+taskId = "";
+if(target != null && target.containKey("id") && target.get("id") != null)
+{
+	taskId = target.get("id").toString();
+}
+if(taskId == null || taskId == "")
+{
+	return {"text":"⚠️ No task id provided to delete."};
+}
+// 2) Get current user id
+uidStr = "";
+if(user != null && user.containKey("id") && user.get("id") != null)
+{
+	uidStr = user.get("id").toString();
+}
+if(uidStr == null || uidStr == "")
+{
+	return {"text":"⚠️ Could not determine user id."};
+}
+// 3) Lookup task record in tickflowdb to read stored projectid, title and record id
+taskQuery = Map();
+taskQuery.put("criteria","userid == " + uidStr);
+taskDb = zoho.cliq.getRecords("tickflowdb",taskQuery);
+info "tickflowdeletetask → tickflowdb:";
+info taskDb;
+foundTask = false;
+projectId = "";
+projectName = "";
+taskTitle = "";
+recordId = "";
+trec = null;
+if(taskDb != null && taskDb.containKey("status") && taskDb.get("status") == "SUCCESS" && taskDb.containKey("list") && taskDb.get("list") != null)
+{
+	recList = taskDb.get("list");
+	for each  rec in recList
+	{
+		if(rec != null && rec.containKey("taskid") && rec.get("taskid") != null)
+		{
+			recTid = rec.get("taskid").toString();
+			if(recTid == taskId)
+			{
+				foundTask = true;
+				trec = rec;
+				if(rec.containKey("projectid") && rec.get("projectid") != null)
+				{
+					projectId = rec.get("projectid").toString();
+				}
+				if(rec.containKey("projectname") && rec.get("projectname") != null)
+				{
+					projectName = rec.get("projectname").toString();
+				}
+				if(rec.containKey("tasktitle") && rec.get("tasktitle") != null)
+				{
+					taskTitle = rec.get("tasktitle").toString();
+				}
+				if(rec.containKey("id") && rec.get("id") != null)
+				{
+					recordId = rec.get("id").toString();
+				}
+				break;
+			}
+		}
+	}
+}
+if(foundTask == false)
+{
+	return {"text":"❌ Task not found in TickFlow DB."};
+}
+// 4) Try to delete via TickTick (several strategies)
+deleteOk = false;
+deleteResp = null;
+// 4.a) If we have projectId in DB, try project endpoint first (DELETE)
+if(projectId != null && projectId != "")
+{
+	try 
+	{
+		deleteResp = invokeurl
+		[
+			url :baseUrl + "/project/" + projectId + "/task/" + taskId
+			type :DELETE
+			connection:"ticktick_oauth"
+		];
+		info "tickflowdeletetask → project deleteResp (from DB projectId):";
+		info deleteResp;
+		deleteOk = true;
+	}
+	catch (e1)
+	{
+		info "tickflowdeletetask → project delete (DB projectId) failed:";
+		info e1;
+		deleteOk = false;
+	}
+}
+// 4.b) Try direct /task/{id} DELETE (works for Inbox / id-based)
+if(deleteOk == false)
+{
+	try 
+	{
+		deleteResp = invokeurl
+		[
+			url :baseUrl + "/task/" + taskId
+			type :DELETE
+			connection:"ticktick_oauth"
+		];
+		info "tickflowdeletetask → /task/{id} DELETE resp:";
+		info deleteResp;
+		deleteOk = true;
+	}
+	catch (e2)
+	{
+		info "tickflowdeletetask → /task/{id} DELETE failed:";
+		info e2;
+		deleteOk = false;
+	}
+}
+// 4.c) If still not deleted, GET the task to attempt to learn projectId and retry project endpoint
+if(deleteOk == false)
+{
+	try 
+	{
+		getResp = invokeurl
+		[
+			url :baseUrl + "/task/" + taskId
+			type :GET
+			connection:"ticktick_oauth"
+		];
+		info "tickflowdeletetask → GET /task/{id} resp:";
+		info getResp;
+		if(getResp != null && getResp.containKey("projectId") && getResp.get("projectId") != null)
+		{
+			fetchedProj = getResp.get("projectId").toString();
+			if(fetchedProj != "")
+			{
+				try 
+				{
+					deleteResp = invokeurl
+					[
+						url :baseUrl + "/project/" + fetchedProj + "/task/" + taskId
+						type :DELETE
+						connection:"ticktick_oauth"
+					];
+					info "tickflowdeletetask → retry delete with fetched project id resp:";
+					info deleteResp;
+					deleteOk = true;
+					projectId = fetchedProj;
+				}
+				catch (e3)
+				{
+					info "tickflowdeletetask → retry with fetched project failed:";
+					info e3;
+					deleteOk = false;
+				}
+			}
+		}
+	}
+	catch (getErr)
+	{
+		info "tickflowdeletetask → GET /task failed:";
+		info getErr;
+	}
+}
+// 4.d) FINAL fallback: if still not deleted, and we have NO projectId in DB, try the provided fallbackProjectId
+if(deleteOk == false)
+{
+	// Only try fallback if DB projectId was blank (we don't override a real DB projectId)
+	if(projectId == null || projectId == "")
+	{
+		try 
+		{
+			deleteResp = invokeurl
+			[
+				url :baseUrl + "/project/" + fallbackProjectId + "/task/" + taskId
+				type :DELETE
+				connection:"ticktick_oauth"
+			];
+			info "tickflowdeletetask → fallback project deleteResp (fallbackProjectId):";
+			info deleteResp;
+			deleteOk = true;
+			projectId = fallbackProjectId;
+		}
+		catch (e4)
+		{
+			info "tickflowdeletetask → fallback project delete failed:";
+			info e4;
+			deleteOk = false;
+		}
+	}
+}
+// 5) If still failed, return an error
+if(deleteOk == false)
+{
+	return {"text":"⚠️ Could not delete task in TickTick. Check your OAuth scopes/connection and try again."};
+}
+// 6) Success: update TickFlow DB metatask.status = 3 (deleted) if exists and optionally log deletion
+try 
+{
+	if(trec != null && trec.containKey("metatask") && trec.get("metatask") != null && trec.get("metatask") != "")
+	{
+		oldMetaStr = trec.get("metatask").toString();
+		m = Map();
+		try 
+		{
+			m = oldMetaStr.toMap();
+		}
+		catch (metaEx)
+		{
+			m = Map();
+		}
+		m.put("status",3);
+		// 3 => deleted
+		updVals = Map();
+		updVals.put("metatask",m.toString());
+		if(recordId != null && recordId != "")
+		{
+			updResp = zoho.cliq.updateRecord("tickflowdb",recordId,updVals);
+			info "tickflowdeletetask → update tickflowdb metatask status resp:";
+			info updResp;
+		}
+	}
+	else
+	{
+		// If no metatask column or blank, create a minimal metatask
+		if(recordId != null && recordId != "")
+		{
+			metaNew = Map();
+			metaNew.put("status",3);
+			updVals2 = Map();
+			updVals2.put("metatask",metaNew.toString());
+			updResp2 = zoho.cliq.updateRecord("tickflowdb",recordId,updVals2);
+			info "tickflowdeletetask → set basic metatask status resp:";
+			info updResp2;
+		}
+	}
+}
+catch (dbUpdErr)
+{
+	info "tickflowdeletetask → error updating metatask:";
+	info dbUpdErr;
+}
+// 7) Log deletion into tickflowdeleted (optional)
+try 
+{
+	delVals = Map();
+	delVals.put("userid",uidStr.toLong());
+	delVals.put("taskid",taskId);
+	if(projectId == null || projectId == "")
+	{
+		if(projectName == null || projectName == "")
+		{
+			delVals.put("projectname","Inbox");
+		}
+		else
+		{
+			delVals.put("projectname",projectName);
+		}
+	}
+	else
+	{
+		delVals.put("projectid",projectId);
+		if(projectName == null || projectName == "")
+		{
+			delVals.put("projectname","Project");
+		}
+		else
+		{
+			delVals.put("projectname",projectName);
+		}
+	}
+	if(taskTitle == null || taskTitle == "")
+	{
+		delVals.put("tasktitle","Untitled task");
+	}
+	else
+	{
+		delVals.put("tasktitle",taskTitle);
+	}
+	delVals.put("deletedat",zoho.currenttime.toString());
+	delIns = zoho.cliq.createRecord("tickflowdeleted",delVals);
+	info "tickflowdeletetask → tickflowdeleted insert:";
+	info delIns;
+}
+catch (logErr)
+{
+	info "tickflowdeletetask → error logging deletion:";
+	info logErr;
+}
+// 8) Delete original record from tickflowdb (optional behavior you used before)
+if(recordId != null && recordId != "")
+{
+	try 
+	{
+		delResp2 = zoho.cliq.deleteRecord("tickflowdb",recordId);
+		info "tickflowdeletetask → deleted tickflowdb recId: " + recordId;
+		info delResp2;
+	}
+	catch (delErr)
+	{
+		info "tickflowdeletetask → error deleting tickflowdb record:";
+		info delErr;
+	}
+}
+// 9) Reply to user
+msg = "🗑️ Task deleted.";
+if(taskTitle != null && taskTitle != "")
+{
+	msg = "🗑️ Task deleted: *" + taskTitle + "*";
+}
+return {"text":msg};
+

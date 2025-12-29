@@ -1,0 +1,133 @@
+
+// FUNCTION: tickflowSyncAll
+uid = user.get("id").toLong();
+uidStr = uid.toString();
+baseUrl = "https://api.ticktick.com/open/v1";
+errors = list();
+// -----------------------------------------------------
+// 1) GET PROJECTS RAW
+// TickTick returns loose JSON objects "{},{},{}"
+// -----------------------------------------------------
+projectsRaw = invokeurl
+[
+	url :baseUrl + "/project"
+	type :GET
+	connection:"ticktick_oauth"
+];
+// Convert "{},{},{}" → "[{}, {}, {}]"
+projectsJson = "[" + projectsRaw + "]";
+projectsList = projectsJson.toList();
+// -----------------------------------------------------
+// 2) LOOP PROJECTS
+// -----------------------------------------------------
+projectsrm = list();
+tasksrm = list();
+for each  p in projectsList
+{
+	projectId = p.get("id");
+	projectName = p.get("name");
+	// -----------------------------------------------------
+	// UPSERT PROJECT
+	// -----------------------------------------------------
+	projQuery = {"criteria":"projectid ==" + projectId};
+	projCheck = zoho.cliq.getRecords("tickflowprojects",projQuery);
+	info projCheck;
+	if(projCheck.get("list") != null && projCheck.get("list").size() > 0)
+	{
+		recId = projCheck.get("list").get(0).get("id");
+		zoho.cliq.updateRecord("tickflowprojects",recId.toString(),{"projectname":projectName});
+		projectsrm.add(projectId);
+	}
+	else
+	{
+		zoho.cliq.createRecord("tickflowprojects",{"userid":uid,"projectid":projectId,"projectname":projectName});
+		projectsrm.add(projectId);
+	}
+	// -----------------------------------------------------
+	// 3) GET TASKS FOR PROJECT
+	// -----------------------------------------------------
+	taskResp = invokeurl
+	[
+		url :baseUrl + "/project/" + projectId + "/data"
+		type :GET
+		connection:"ticktick_oauth"
+	];
+	tasksArr = taskResp.get("tasks");
+	// -----------------------------------------------------
+	// 4) UPSERT TASKS
+	// -----------------------------------------------------
+	for each  t in tasksArr
+	{
+		taskId = t.get("id");
+		// make taskmeta JSON
+		taskmeta = Map();
+		taskmeta.put("duedate",t.get("dueDate"));
+		taskmeta.put("reminders",t.get("reminders"));
+		taskmeta.put("subtasks",t.get("subtasks"));
+		// check if task exists
+		taskQuery = {"criteria":"taskid ==" + taskId};
+		taskCheck = zoho.cliq.getRecords("tickflowdb",taskQuery);
+		taskData = {"userid":uid,"taskid":taskId,"projectid":projectId,"projectname":projectName,"tasktitle":t.get("title"),"taskmeta":taskmeta.toString(),"starttime":0};
+		if(taskCheck.get("list") != null && taskCheck.get("list").size() > 0)
+		{
+			tasksrm.add(taskId);
+			recId = taskCheck.get("list").get(0).get("id");
+			zoho.cliq.updateRecord("tickflowdb",recId.toString(),taskData);
+		}
+		else
+		{
+			tasksrm.add(taskId);
+			zoho.cliq.createRecord("tickflowdb",taskData);
+		}
+	}
+	// -----------------------------------------------------
+	// 5) DELETE PROJECTS NOT IN projectsrm
+	// -----------------------------------------------------
+	allDbProjects = zoho.cliq.getRecords("tickflowprojects",{"criteria":"userid == " + uid});
+	if(allDbProjects.get("list") != null)
+	{
+		for each  dbp in allDbProjects.get("list")
+		{
+			dbProjectId = dbp.get("projectid");
+			if(!projectsrm.contains(dbProjectId))
+			{
+				// ✅ Delete project
+				zoho.cliq.deleteRecord("tickflowprojects",dbp.get("id").toString());
+				// ✅ Delete all tasks under this project
+				oldTasks = zoho.cliq.getRecords("tickflowdb",{"criteria":"projectid == \"" + dbProjectId + "\""});
+				if(oldTasks.get("list") != null)
+				{
+					for each  ot in oldTasks.get("list")
+					{
+						zoho.cliq.deleteRecord("tickflowdb",ot.get("id").toString());
+					}
+				}
+			}
+		}
+	}
+	// -----------------------------------------------------
+	// 6) DELETE TASKS NOT IN tasksrm
+	// -----------------------------------------------------
+	allDbTasks = zoho.cliq.getRecords("tickflowdb",{"criteria":"userid == " + uid});
+	if(allDbTasks.get("list") != null)
+	{
+		for each  dt in allDbTasks.get("list")
+		{
+			dbTaskId = dt.get("taskid");
+			if(!tasksrm.contains(dbTaskId))
+			{
+				zoho.cliq.deleteRecord("tickflowdb",dt.get("id").toString());
+			}
+		}
+	}
+}
+// -----------------------------------------------------
+// FINAL RESPONSE
+// -----------------------------------------------------
+msg = "Sync Completed Successfully!";
+if(errors.size() > 0)
+{
+	msg = msg + "\nIssues: " + errors.toString();
+}
+return {"text":msg};
+

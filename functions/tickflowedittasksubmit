@@ -1,0 +1,422 @@
+
+// FUNCTION: tickflowedittasksubmit
+// Deluge function to handle Edit Task form submit: updates TickTick and tickflowdb safely.
+baseUrl = "https://api.ticktick.com/open/v1";
+// 0) Handle cancel
+if(form.get("action") == "cancel")
+{
+	return {"text":"Task edit cancelled."};
+}
+// 1) Read form values
+vals = form.get("values");
+info "tickflowedittasksubmit → form values:";
+info vals;
+// Required fields from form (taskid/projectid should be present as hidden inputs)
+taskId = "";
+projectId = "";
+taskTitle = "";
+desc = "";
+dueField = "";
+remField = "";
+subtasksText = "";
+// read safely
+if(vals.containKey("taskid") && vals.get("taskid") != null)
+{
+	taskId = vals.get("taskid").toString();
+}
+if(vals.containKey("projectid") && vals.get("projectid") != null)
+{
+	projectId = vals.get("projectid").toString();
+}
+if(vals.containKey("tasktitle") && vals.get("tasktitle") != null)
+{
+	taskTitle = vals.get("tasktitle").toString().trim();
+}
+if(vals.containKey("description") && vals.get("description") != null)
+{
+	desc = vals.get("description").toString();
+}
+if(vals.containKey("duedate") && vals.get("duedate") != null)
+{
+	dueField = vals.get("duedate");
+}
+// could be string or map
+if(vals.containKey("reminders") && vals.get("reminders") != null)
+{
+	remField = vals.get("reminders");
+}
+// could be string or map
+if(vals.containKey("subtasks") && vals.get("subtasks") != null)
+{
+	subtasksText = vals.get("subtasks").toString();
+}
+// Basic validation
+if(taskId == null || taskId == "")
+{
+	return {"text":"❌ Missing task id."};
+}
+if(taskTitle == null || taskTitle == "")
+{
+	return {"text":"⚠️ Task title cannot be empty."};
+}
+// 2) Convert/normalize due date for TickTick
+// dueField might be:
+// - string like "2025-12-02 09:00" OR
+// - map like {"date_time":"2025-11-30T09:00","time_zone_id":"Asia/Kolkata"}
+// We will attempt to set dueDate/startDate and timeZone when possible.
+// --------- DUE DATE NORMALIZATION (SAFE) ---------
+dueApiString = "";
+tzForApi = "";
+// If user selected datepicker value (map)
+try 
+{
+	// Try map-style access
+	if(dueField != null && dueField.containKey("date_time"))
+	{
+		rawDT = dueField.get("date_time").toString();
+		// e.g. "2025-11-30T09:00"
+		// If seconds missing → add ":00"
+		if(rawDT.length() == 16 && rawDT.indexOf("T") != -1)
+		{
+			rawDT = rawDT + ":00";
+		}
+		dueApiString = rawDT;
+		// final string
+		tzForApi = dueField.get("time_zone_id").toString();
+		// "Asia/Kolkata"
+	}
+}
+catch (e1)
+{
+	// Not a map → ignore, fallback below
+	info "dueField is not a map, trying text parse";
+}
+// If still empty → try parsing string like "2025-12-10 18:00"
+if((dueApiString == "" || dueApiString == null) && dueField != null)
+{
+	try 
+	{
+		ds = dueField.toString();
+		// force string
+		dtObj = ds.toTime("yyyy-MM-dd HH:mm");
+		// try parsing
+		dueApiString = dtObj.toString("yyyy-MM-dd'T'HH:mm:ssZ");
+		tzForApi = "";
+		// offset already included in string
+	}
+	catch (e2)
+	{
+		info "tickflowedittasksubmit → string parse failed:";
+		info e2;
+		dueApiString = "";
+		tzForApi = "";
+	}
+}
+// Log final value
+info "FINAL dueApiString: " + dueApiString;
+info "FINAL tzForApi: " + tzForApi;
+// 3) Convert reminders from form into TickTick reminder strings (if provided)
+// remField might be string like "none" or map {"label":"At due","value":"at_due"}
+remList = list();
+try 
+{
+	remVal = "";
+	if(remField != null)
+	{
+		info "remfield";
+		info remField;
+		if(remField.containKey("value") && remField.get("value") != null)
+		{
+			remVal = remField.get("value").toString();
+		}
+		else if(remField.containKey("label") && remField.get("label") != null)
+		{
+			remVal = remField.get("label").toString();
+		}
+		else
+		{
+			remVal = remField.toString();
+		}
+	}
+	// map known values to TickTick trigger strings
+	if(remVal != null && remVal != "" && remVal != "none")
+	{
+		if(remVal == "at_due" || remVal == "At due" || remVal == "At due time")
+		{
+			remList.add("TRIGGER:PT0S");
+		}
+		else if(remVal == "one_hour_before" || remVal == "1 hour before" || remVal == "1h_before")
+		{
+			remList.add("TRIGGER:PT1H0M0S");
+		}
+		else if(remVal == "one_day_before" || remVal == "1 day before" || remVal == "1d_before")
+		{
+			remList.add("TRIGGER:PT24H0M0S");
+		}
+		else
+		{
+			// if unknown, do not include or try to include raw value (not recommended)
+			// skip unknown values to avoid API error
+			info "tickflowedittasksubmit → unknown reminder value, skipping: " + remVal;
+		}
+	}
+}
+catch (e_rem)
+{
+	info "tickflowedittasksubmit → reminder processing error:";
+	info e_rem;
+	remList = list();
+}
+// 4) Build TickTick update body
+taskBody = Map();
+taskBody.put("id",taskId);
+taskBody.put("title",taskTitle);
+if(projectId != null && projectId != "")
+{
+	taskBody.put("projectId",projectId);
+}
+if(desc != null && desc != "")
+{
+	taskBody.put("content",desc);
+}
+// include due/start if we have dueApiString
+if(dueApiString != null && dueApiString != "")
+{
+	// TickTick accepts "startDate" and/or "dueDate" in ISO-like format
+	// We'll pass both to be safe and include tz if available
+	taskBody.put("dueDate",dueApiString);
+	if(tzForApi != null && tzForApi != "")
+	{
+		taskBody.put("timeZone",tzForApi);
+	}
+	else
+	{
+		// attempt a fallback zone name
+		taskBody.put("timeZone","Asia/Kolkata");
+	}
+	taskBody.put("isAllDay",false);
+}
+// include reminders if any
+if(remList.size() > 0)
+{
+	taskBody.put("reminders",remList);
+}
+// set a default priority if not present
+taskBody.put("priority",0);
+info "tickflowedittasksubmit → built taskBody:";
+info taskBody;
+// 5) Call TickTick update endpoint
+updateResp = null;
+try 
+{
+	updateResp = invokeurl
+	[
+		url :baseUrl + "/task/" + taskId
+		type :POST
+		body:taskBody.toString()
+		headers:{"Content-Type":"application/json"}
+		connection:"ticktick_oauth"
+	];
+	info "tickflowedittasksubmit → TickTick updateResp:";
+	info updateResp;
+}
+catch (e_api)
+{
+	info "tickflowedittasksubmit → TickTick update error:";
+	info e_api;
+	// proceed to still update DB locally
+}
+// 6) Fetch tickflowdb and find matching record (by taskid)
+uidStr = user.get("id");
+query = Map();
+query.put("criteria","userid == " + uidStr);
+dbResp = zoho.cliq.getRecords("tickflowdb",query);
+info "tickflowedittasksubmit → tickflowdb fetch:";
+info dbResp;
+foundRecId = "";
+if(dbResp != null && dbResp.containKey("status") && dbResp.get("status") == "SUCCESS" && dbResp.containKey("list") && dbResp.get("list") != null)
+{
+	recList = dbResp.get("list");
+	for each  r in recList
+	{
+		// some stored records may store taskid as string or numeric — convert to string to compare
+		if(r.containKey("taskid") && r.get("taskid") != null)
+		{
+			if(r.get("taskid").toString() == taskId)
+			{
+				foundRecId = r.get("id").toString();
+				recObj = r;
+				// keep object for column checking
+				break;
+			}
+		}
+	}
+}
+else
+{
+	info "tickflowedittasksubmit → could not fetch tickflowdb or no list returned.";
+}
+// 7) Update DB: only update existing columns; fallback to taskmeta if necessary
+if(foundRecId != null && foundRecId != "")
+{
+	// gather candidate update values
+	updVals = Map();
+	// check if the fetched recObj has the columns before adding
+	try 
+	{
+		// tasktitle
+		if(recObj.containKey("tasktitle"))
+		{
+			updVals.put("tasktitle",taskTitle);
+		}
+		// description (some DBs may not have 'description' column)
+		if(recObj.containKey("description"))
+		{
+			updVals.put("description",desc);
+		}
+		// duedate column: prefer a human-readable format
+		dueTextForDB = "";
+		if(dueApiString != null && dueApiString != "")
+		{
+			// Build readable due for DB: try to use same ISO date or the original input
+			dueTextForDB = dueApiString;
+		}
+		if(recObj.containKey("duedate") && dueTextForDB != "")
+		{
+			updVals.put("duedate",dueTextForDB);
+		}
+		// reminders: store readable label if the form provided a map or string
+		remForDB = "";
+		try 
+		{
+			if(remField != null)
+			{
+				if(remField.containKey("label"))
+				{
+					remForDB = remField.get("label").toString();
+				}
+				else
+				{
+					remForDB = remField.toString();
+				}
+			}
+		}
+		catch (e_rem2)
+		{
+			remForDB = "";
+		}
+		if(recObj.containKey("reminders") && remForDB != "")
+		{
+			updVals.put("reminders",remForDB);
+		}
+		// subtasks
+		if(recObj.containKey("subtasks"))
+		{
+			updVals.put("subtasks",subtasksText);
+		}
+		// If we have at least one column to update, do it
+		if(updVals.size() > 0)
+		{
+			try 
+			{
+				updResp = zoho.cliq.updateRecord("tickflowdb",foundRecId,updVals);
+				info "tickflowedittasksubmit → tickflowdb updateResp:";
+				info updResp;
+			}
+			catch (e_upd)
+			{
+				info "tickflowedittasksubmit → updateRecord failed:";
+				info e_upd;
+				// fallback to updating taskmeta
+				newMeta = "Description: ";
+				if(desc != null && desc != "")
+				{
+					newMeta = newMeta + desc;
+				}
+				newMeta = newMeta + "\n";
+				newMeta = newMeta + "Due: ";
+				if(dueTextForDB != null && dueTextForDB != "")
+				{
+					newMeta = newMeta + dueTextForDB;
+				}
+				newMeta = newMeta + "\n";
+				newMeta = newMeta + "Reminders: ";
+				if(remForDB != null && remForDB != "")
+				{
+					newMeta = newMeta + remForDB;
+				}
+				newMeta = newMeta + "\n";
+				newMeta = newMeta + "Subtasks:\n";
+				if(subtasksText != null && subtasksText != "")
+				{
+					newMeta = newMeta + subtasksText;
+				}
+				try 
+				{
+					metaUpd = Map();
+					metaUpd.put("taskmeta",newMeta);
+					metaResp = zoho.cliq.updateRecord("tickflowdb",foundRecId,metaUpd);
+					info "tickflowedittasksubmit → fallback taskmeta updateResp:";
+					info metaResp;
+				}
+				catch (e_meta)
+				{
+					info "tickflowedittasksubmit → fallback update failed:";
+					info e_meta;
+				}
+			}
+		}
+		else
+		{
+			// Nothing to update as columns missing -> update taskmeta
+			newMeta = "Description: ";
+			if(desc != null && desc != "")
+			{
+				newMeta = newMeta + desc;
+			}
+			newMeta = newMeta + "\n";
+			newMeta = newMeta + "Due: ";
+			if(dueTextForDB != null && dueTextForDB != "")
+			{
+				newMeta = newMeta + dueTextForDB;
+			}
+			newMeta = newMeta + "\n";
+			newMeta = newMeta + "Reminders: ";
+			if(remForDB != null && remForDB != "")
+			{
+				newMeta = newMeta + remForDB;
+			}
+			newMeta = newMeta + "\n";
+			newMeta = newMeta + "Subtasks:\n";
+			if(subtasksText != null && subtasksText != "")
+			{
+				newMeta = newMeta + subtasksText;
+			}
+			try 
+			{
+				metaUpd2 = Map();
+				metaUpd2.put("taskmeta",newMeta);
+				metaResp2 = zoho.cliq.updateRecord("tickflowdb",foundRecId,metaUpd2);
+				info "tickflowedittasksubmit → taskmeta-only updateResp:";
+				info metaResp2;
+			}
+			catch (e_meta2)
+			{
+				info "tickflowedittasksubmit → taskmeta-only update failed:";
+				info e_meta2;
+			}
+		}
+	}
+	catch (e_any2)
+	{
+		info "tickflowedittasksubmit → unexpected error during DB update:";
+		info e_any2;
+	}
+}
+else
+{
+	info "tickflowedittasksubmit → no matching tickflowdb record found for taskId: " + taskId;
+}
+// 8) Final response to user
+return {"text":"✅ Task updated: *" + taskTitle + "*"};
+

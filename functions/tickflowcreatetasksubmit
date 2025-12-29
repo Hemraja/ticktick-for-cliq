@@ -1,0 +1,1493 @@
+
+baseUrl = "https://api.ticktick.com/open/v1";
+r = Map();
+// 0) Cancel
+if(form.containKey("action") && form.get("action") == "cancel")
+{
+	return {"text":"Task creation cancelled."};
+}
+// 1) Read form values
+formValues = form.get("values");
+info "tickflowcreatetasksubmit → form values:";
+info formValues;
+taskTitle = "";
+desc = "";
+rawDueInput = null;
+rawRemInput = null;
+subtasksText = "";
+projectId = "";
+projectName = "";
+priorityLabel = "";
+// Title (mandatory)
+if(formValues.containKey("tasktitle") && formValues.get("tasktitle") != null)
+{
+	taskTitle = formValues.get("tasktitle").toString().trim();
+}
+if(taskTitle == null || taskTitle == "")
+{
+	return {"text":"⚠️ Task title is required."};
+}
+// Optional Project
+if(formValues.containKey("project") && formValues.get("project") != null)
+{
+	projField = formValues.get("project");
+	if(projField.containKey("value") && projField.get("value") != null)
+	{
+		projectId = projField.get("value").toString().trim();
+	}
+	if(projField.containKey("label") && projField.get("label") != null)
+	{
+		projectName = projField.get("label").toString().trim();
+	}
+}
+// Description
+if(formValues.containKey("description") && formValues.get("description") != null)
+{
+	desc = formValues.get("description").toString();
+}
+// Due input (keep raw)
+if(formValues.containKey("duedate") && formValues.get("duedate") != null)
+{
+	rawDueInput = formValues.get("duedate");
+}
+// Reminder plain input (keep raw)
+if(formValues.containKey("reminders") && formValues.get("reminders") != null)
+{
+	rawRemInput = formValues.get("reminders");
+}
+// Subtasks textarea
+if(formValues.containKey("subtasks") && formValues.get("subtasks") != null)
+{
+	subtasksText = formValues.get("subtasks").toString();
+}
+// Priority field (label or numeric)
+if(formValues.containKey("priority") && formValues.get("priority") != null)
+{
+	priorityLabel = formValues.get("priority").toString().trim();
+}
+// Sanitize nulls
+if(projectId == null)
+{
+	projectId = "";
+}
+if(projectName == null)
+{
+	projectName = "";
+}
+// ----- PRIORITY MAPPING -----
+// === Read priority safely (handles object {label,value} or plain string/number) ===
+priorityLabel = "";
+if(formValues.containKey("priority") && formValues.get("priority") != null)
+{
+	rawPriorityField = formValues.get("priority");
+	// try map-like (has get/containKey)
+	isMapPri = false;
+	try 
+	{
+		testp = rawPriorityField.containKey("value");
+		isMapPri = true;
+	}
+	catch (e)
+	{
+		isMapPri = false;
+	}
+	if(isMapPri == true)
+	{
+		// prefer explicit 'value' then 'label'
+		try 
+		{
+			if(rawPriorityField.containKey("value") && rawPriorityField.get("value") != null)
+			{
+				priorityLabel = rawPriorityField.get("value").toString().trim();
+			}
+			else if(rawPriorityField.containKey("label") && rawPriorityField.get("label") != null)
+			{
+				priorityLabel = rawPriorityField.get("label").toString().trim();
+			}
+		}
+		catch (pe)
+		{
+			priorityLabel = rawPriorityField.toString().trim();
+		}
+	}
+	else
+	{
+		// primitive string/number
+		priorityLabel = rawPriorityField.toString().trim();
+	}
+}
+// === PRIORITY MAPPING (UI 1,3,5 -> API 1,2,3) ===
+priorityInt = 0;
+if(priorityLabel != null && priorityLabel != "")
+{
+	pl = priorityLabel.toLowerCase().trim();
+	// accept label names
+	if(pl == "none" || pl == "0" || pl == "no" || pl == "nil")
+	{
+		priorityInt = 0;
+	}
+	else if(pl == "low" || pl == "1")
+	{
+		priorityInt = 1;
+	}
+	else if(pl == "medium" || pl == "3")
+	{
+		priorityInt = 3;
+	}
+	else if(pl == "high" || pl == "hard" || pl == "5")
+	{
+		priorityInt = 5;
+	}
+	else
+	{
+		// numeric possibility: UI numbers 1,3,5 or generic numeric
+		try 
+		{
+			tmpPriority = priorityLabel.toLong();
+			// map UI 1->1, 3->2, 5->3
+			if(tmpPriority == 1)
+			{
+				priorityInt = 1;
+			}
+			else if(tmpPriority == 3)
+			{
+				priorityInt = 3;
+			}
+			else if(tmpPriority == 5)
+			{
+				priorityInt = 5;
+			}
+			else
+			{
+				// assume API-style; clamp 0..3
+				if(tmpPriority < 0)
+				{
+					tmpPriority = 0;
+				}
+				if(tmpPriority > 5)
+				{
+					tmpPriority = 5;
+				}
+				priorityInt = tmpPriority;
+			}
+		}
+		catch (ex)
+		{
+			priorityInt = 0;
+		}
+	}
+}
+info "Mapped priorityInt: " + priorityInt.toString();
+info "Mapped priorityInt: " + priorityInt.toString();
+// ----- END PRIORITY MAPPING -----
+// ----- DUE DATE NORMALIZATION (no instanceof) -----
+// Output: dueApiString e.g. "2025-12-10T09:00:00+0530"
+dueApiString = "";
+isAllDayFlag = false;
+timeZoneForApi = "Asia/Kolkata";
+// default
+// Helper-like detection for map-like rawDueInput
+isMapLike = false;
+if(rawDueInput != null)
+{
+	try 
+	{
+		test = rawDueInput.containKey("date_time");
+		isMapLike = true;
+	}
+	catch (e)
+	{
+		isMapLike = false;
+	}
+}
+if(rawDueInput != null)
+{
+	if(isMapLike == true)
+	{
+		// rawDueInput is a map-like object: expected keys "date_time" and optional "time_zone_id"
+		dtStr = "";
+		try 
+		{
+			if(rawDueInput.containKey("date_time") && rawDueInput.get("date_time") != null)
+			{
+				dtStr = rawDueInput.get("date_time").toString().trim();
+			}
+			if(rawDueInput.containKey("time_zone_id") && rawDueInput.get("time_zone_id") != null)
+			{
+				timeZoneForApi = rawDueInput.get("time_zone_id").toString().trim();
+			}
+		}
+		catch (ex)
+		{
+			dtStr = "";
+		}
+		if(dtStr != "")
+		{
+			// Normalize: uppercase T, ensure seconds
+			dtStr = dtStr.replaceAll("t","T");
+			if(dtStr.length() == 16)
+			{
+				// "YYYY-MM-DDTHH:MM"
+				dtStr = dtStr + ":00";
+			}
+			// --- inline ensureOffset block ---
+			dtCandidate = dtStr;
+			hasOffset = false;
+			if(dtCandidate != null && dtCandidate != "")
+			{
+				len = dtCandidate.length();
+				if(len >= 5)
+				{
+					last5 = dtCandidate.subString(len - 5,len);
+					firstCharLast5 = last5.subString(0,1);
+					if(firstCharLast5 == "+" || firstCharLast5 == "-")
+					{
+						rest = last5.subString(1,last5.length());
+						isDigits = true;
+						try 
+						{
+							dummy = rest.toLong();
+						}
+						catch (exd)
+						{
+							isDigits = false;
+						}
+						if(isDigits == true)
+						{
+							hasOffset = true;
+						}
+					}
+				}
+				if(hasOffset == false && len >= 6)
+				{
+					last6 = dtCandidate.subString(len - 6,len);
+					firstCharLast6 = last6.subString(0,1);
+					if(firstCharLast6 == "+" || firstCharLast6 == "-")
+					{
+						hasOffset = true;
+					}
+				}
+			}
+			if(hasOffset == false)
+			{
+				if(timeZoneForApi == "Asia/Kolkata")
+				{
+					dtCandidate = dtCandidate + "+0530";
+				}
+				else if(timeZoneForApi == "UTC" || timeZoneForApi == "Etc/UTC")
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+				else
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+			}
+			dtStr = dtCandidate;
+			// --- end ensureOffset block ---
+			dueApiString = dtStr;
+			isAllDayFlag = false;
+		}
+	}
+	else
+	{
+		// rawDueInput is likely a string — fallback parsing
+		raw = rawDueInput.toString().trim();
+		// Try common parse patterns
+		parsed = null;
+		try 
+		{
+			parsed = raw.toTime("yyyy-MM-dd HH:mm");
+			isAllDayFlag = false;
+		}
+		catch (e1)
+		{
+			try 
+			{
+				parsed = raw.toTime("yyyy-MM-dd");
+				isAllDayFlag = true;
+			}
+			catch (e2)
+			{
+				try 
+				{
+					parsed = raw.toTime("yyyy-MM-dd'T'HH:mm");
+					isAllDayFlag = false;
+				}
+				catch (e3)
+				{
+					parsed = null;
+				}
+			}
+		}
+		if(parsed != null)
+		{
+			tmp = parsed.toString("yyyy-MM-dd'T'HH:mm:ssZ");
+			// --- inline ensureOffset for tmp ---
+			dtCandidate = tmp;
+			hasOffset = false;
+			if(dtCandidate != null && dtCandidate != "")
+			{
+				len = dtCandidate.length();
+				if(len >= 5)
+				{
+					last5 = dtCandidate.subString(len - 5,len);
+					firstCharLast5 = last5.subString(0,1);
+					if(firstCharLast5 == "+" || firstCharLast5 == "-")
+					{
+						rest = last5.subString(1,last5.length());
+						isDigits = true;
+						try 
+						{
+							dummy = rest.toLong();
+						}
+						catch (exd)
+						{
+							isDigits = false;
+						}
+						if(isDigits == true)
+						{
+							hasOffset = true;
+						}
+					}
+				}
+				if(hasOffset == false && len >= 6)
+				{
+					last6 = dtCandidate.subString(len - 6,len);
+					firstCharLast6 = last6.subString(0,1);
+					if(firstCharLast6 == "+" || firstCharLast6 == "-")
+					{
+						hasOffset = true;
+					}
+				}
+			}
+			if(hasOffset == false)
+			{
+				if(timeZoneForApi == "Asia/Kolkata")
+				{
+					dtCandidate = dtCandidate + "+0530";
+				}
+				else if(timeZoneForApi == "UTC" || timeZoneForApi == "Etc/UTC")
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+				else
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+			}
+			tmp = dtCandidate;
+			// --- end ensureOffset block ---
+			dueApiString = tmp;
+		}
+		else
+		{
+			// last-ditch transform: replace space with 'T', add seconds and ensure offset inline
+			fallback = raw.replaceAll(" ","T");
+			if(fallback.length() == 16)
+			{
+				fallback = fallback + ":00";
+			}
+			dtCandidate = fallback;
+			hasOffset = false;
+			if(dtCandidate != null && dtCandidate != "")
+			{
+				len = dtCandidate.length();
+				if(len >= 5)
+				{
+					last5 = dtCandidate.subString(len - 5,len);
+					firstCharLast5 = last5.subString(0,1);
+					if(firstCharLast5 == "+" || firstCharLast5 == "-")
+					{
+						rest = last5.subString(1,last5.length());
+						isDigits = true;
+						try 
+						{
+							dummy = rest.toLong();
+						}
+						catch (exd)
+						{
+							isDigits = false;
+						}
+						if(isDigits == true)
+						{
+							hasOffset = true;
+						}
+					}
+				}
+				if(hasOffset == false && len >= 6)
+				{
+					last6 = dtCandidate.subString(len - 6,len);
+					firstCharLast6 = last6.subString(0,1);
+					if(firstCharLast6 == "+" || firstCharLast6 == "-")
+					{
+						hasOffset = true;
+					}
+				}
+			}
+			if(hasOffset == false)
+			{
+				if(timeZoneForApi == "Asia/Kolkata")
+				{
+					dtCandidate = dtCandidate + "+0530";
+				}
+				else if(timeZoneForApi == "UTC" || timeZoneForApi == "Etc/UTC")
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+				else
+				{
+					dtCandidate = dtCandidate + "+0000";
+				}
+			}
+			fallback = dtCandidate;
+			dueApiString = fallback;
+			isAllDayFlag = false;
+		}
+	}
+}
+info "Normalized dueApiString: " + dueApiString + " | isAllDay: " + isAllDayFlag.toString() + " | tz: " + timeZoneForApi;
+// ----- REMINDERS NORMALIZATION (no instanceof) -----
+reminderList = list();
+if(rawRemInput != null)
+{
+	// detect map-like
+	isMapRem = false;
+	try 
+	{
+		testRem = rawRemInput.containKey("dummy");
+		// will throw if not map-like
+		isMapRem = true;
+	}
+	catch (exRem)
+	{
+		isMapRem = false;
+	}
+	if(isMapRem == true)
+	{
+		// if it's an empty map, skip; else push stringified map
+		try 
+		{
+			if(rawRemInput.size() > 0)
+			{
+				reminderList.add(rawRemInput.toString());
+			}
+		}
+		catch (ex2)
+		{
+			// ignore
+		}
+	}
+	else
+	{
+		// try treat as list
+		isListRem = false;
+		try 
+		{
+			testSize = rawRemInput.size();
+			isListRem = true;
+		}
+		catch (ex3)
+		{
+			isListRem = false;
+		}
+		if(isListRem == true)
+		{
+			for each  r in rawRemInput
+			{
+				if(r != null && r.toString().trim() != "")
+				{
+					reminderList.add(r.toString().trim());
+				}
+			}
+		}
+		else
+		{
+			// primitive string
+			if(rawRemInput.toString().trim() != "")
+			{
+				reminderList.add(rawRemInput.toString().trim());
+			}
+		}
+	}
+}
+info "Normalized reminders: " + reminderList.toString();
+// 4) Build parent task body (kept for logging but we will send explicit JSON)
+parentBody = Map();
+parentBody.put("title",taskTitle);
+if(projectId != "")
+{
+	parentBody.put("projectId",projectId);
+}
+if(desc != null && desc != "")
+{
+	parentBody.put("content",desc);
+}
+if(dueApiString != "")
+{
+	parentBody.put("dueDate",dueApiString);
+	parentBody.put("timeZone",timeZoneForApi);
+	parentBody.put("isAllDay",isAllDayFlag);
+}
+if(reminderList.size() > 0)
+{
+	parentBody.put("reminders",reminderList);
+}
+parentBody.put("priority",priorityInt);
+info "tickflowcreatetasksubmit → parent task body (Map form for debug):";
+info parentBody;
+// 5) Create parent task in TickTick (FORCED JSON body to guarantee numeric priority)
+parentResp = Map();
+parentTaskId = "";
+returnedProjectId = "";
+try 
+{
+	// build safe JSON body string for parent create (ensures JSON format & numeric priority)
+	jsonParts = list();
+	// escape double-quotes in strings
+	safeTitle = taskTitle.replaceAll("\"","\\\"");
+	jsonParts.add("\"title\":\"" + safeTitle + "\"");
+	// optional: project
+	if(projectId != null && projectId != "")
+	{
+		safePid = projectId.replaceAll("\"","\\\"");
+		jsonParts.add("\"projectId\":\"" + safePid + "\"");
+	}
+	// optional: content/description
+	if(desc != null && desc != "")
+	{
+		safeDesc = desc.replaceAll("\"","\\\"");
+		jsonParts.add("\"content\":\"" + safeDesc + "\"");
+	}
+	// optional: dueDate (already normalized in dueApiString)
+	if(dueApiString != null && dueApiString != "")
+	{
+		jsonParts.add("\"dueDate\":\"" + dueApiString + "\"");
+		jsonParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+		if(isAllDayFlag == true)
+		{
+			jsonParts.add("\"isAllDay\":true");
+		}
+		else
+		{
+			jsonParts.add("\"isAllDay\":false");
+		}
+	}
+	// optional: reminders (array)
+	if(reminderList.size() > 0)
+	{
+		remJson = "[";
+		firstRem = true;
+		for each  r in reminderList
+		{
+			if(firstRem == false)
+			{
+				remJson = remJson + ",";
+			}
+			remJson = remJson + "\"" + r.replaceAll("\"","\\\"") + "\"";
+			firstRem = false;
+		}
+		remJson = remJson + "]";
+		jsonParts.add("\"reminders\":" + remJson);
+	}
+	// priority (ensure numeric, clamp 0..3)
+	if(priorityInt == null)
+	{
+		priorityInt = 0;
+	}
+	if(priorityInt < 0)
+	{
+		priorityInt = 0;
+	}
+	if(priorityInt > 5)
+	{
+		priorityInt = 5;
+	}
+	jsonParts.add("\"priority\":" + priorityInt.toString());
+	// build jsonBody by concatenating each part with commas (no join())
+	jsonBody = "{";
+	firstPart = true;
+	for each  jp in jsonParts
+	{
+		if(firstPart == false)
+		{
+			jsonBody = jsonBody + ",";
+		}
+		jsonBody = jsonBody + jp;
+		firstPart = false;
+	}
+	jsonBody = jsonBody + "}";
+	info "DEBUG → explicit jsonBody (parent): " + jsonBody;
+	parentResp = invokeurl
+	[
+		url :baseUrl + "/task"
+		type :POST
+		body:jsonBody
+		headers:{"Content-Type":"application/json"}
+		connection:"ticktick_oauth"
+	];
+	info "tickflowcreatetasksubmit → parent create resp:";
+	info parentResp;
+	if(parentResp != null)
+	{
+		if(parentResp.containKey("id") && parentResp.get("id") != null)
+		{
+			parentTaskId = parentResp.get("id").toString();
+		}
+		if(parentResp.containKey("projectId") && parentResp.get("projectId") != null)
+		{
+			returnedProjectId = parentResp.get("projectId").toString();
+		}
+		else if(parentResp.containKey("project_id") && parentResp.get("project_id") != null)
+		{
+			returnedProjectId = parentResp.get("project_id").toString();
+		}
+	}
+}
+catch (apiErr)
+{
+	info "TickTick parent create error:";
+	info apiErr;
+	return {"text":"❌ Failed to create parent task in TickTick. Check OAuth/connection and API logs."};
+}
+if(parentTaskId == null || parentTaskId == "")
+{
+	return {"text":"❌ TickTick did not return a parent task id. Aborting."};
+}
+// 6) Parse up to 10 lines from subtasksText and create child tasks using parentId
+full = "";
+if(subtasksText != null && subtasksText != "")
+{
+	full = subtasksText.trim();
+}
+else
+{
+	full = "";
+}
+createdSubCount = 0;
+// BLOCK 1
+line1 = "";
+if(full != null && full != "")
+{
+	i1 = full.indexOf("\n");
+	if(i1 != -1)
+	{
+		line1 = full.subString(0,i1).toString().trim();
+		full = full.subString(i1 + 1,full.length()).toString();
+	}
+	else
+	{
+		line1 = full.toString().trim();
+		full = "";
+	}
+}
+if(line1 != null && line1 != "")
+{
+	try 
+	{
+		// assemble child JSON parts
+		childParts = list();
+		safeTitleC = line1.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp1 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp1:";
+		info childResp1;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e1)
+	{
+		info "child create error 1:";
+		info e1;
+	}
+}
+// BLOCK 2
+line2 = "";
+if(full != null && full != "")
+{
+	i2 = full.indexOf("\n");
+	if(i2 != -1)
+	{
+		line2 = full.subString(0,i2).toString().trim();
+		full = full.subString(i2 + 1,full.length()).toString();
+	}
+	else
+	{
+		line2 = full.toString().trim();
+		full = "";
+	}
+}
+if(line2 != null && line2 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line2.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp2 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp2:";
+		info childResp2;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e2)
+	{
+		info "child create error 2:";
+		info e2;
+	}
+}
+// BLOCK 3
+line3 = "";
+if(full != null && full != "")
+{
+	i3 = full.indexOf("\n");
+	if(i3 != -1)
+	{
+		line3 = full.subString(0,i3).toString().trim();
+		full = full.subString(i3 + 1,full.length()).toString();
+	}
+	else
+	{
+		line3 = full.toString().trim();
+		full = "";
+	}
+}
+if(line3 != null && line3 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line3.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp3 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp3:";
+		info childResp3;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e3)
+	{
+		info "child create error 3:";
+		info e3;
+	}
+}
+// BLOCK 4
+line4 = "";
+if(full != null && full != "")
+{
+	i4 = full.indexOf("\n");
+	if(i4 != -1)
+	{
+		line4 = full.subString(0,i4).toString().trim();
+		full = full.subString(i4 + 1,full.length()).toString();
+	}
+	else
+	{
+		line4 = full.toString().trim();
+		full = "";
+	}
+}
+if(line4 != null && line4 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line4.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp4 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp4:";
+		info childResp4;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e4)
+	{
+		info "child create error 4:";
+		info e4;
+	}
+}
+// BLOCK 5
+line5 = "";
+if(full != null && full != "")
+{
+	i5 = full.indexOf("\n");
+	if(i5 != -1)
+	{
+		line5 = full.subString(0,i5).toString().trim();
+		full = full.subString(i5 + 1,full.length()).toString();
+	}
+	else
+	{
+		line5 = full.toString().trim();
+		full = "";
+	}
+}
+if(line5 != null && line5 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line5.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp5 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp5:";
+		info childResp5;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e5)
+	{
+		info "child create error 5:";
+		info e5;
+	}
+}
+// BLOCK 6
+line6 = "";
+if(full != null && full != "")
+{
+	i6 = full.indexOf("\n");
+	if(i6 != -1)
+	{
+		line6 = full.subString(0,i6).toString().trim();
+		full = full.subString(i6 + 1,full.length()).toString();
+	}
+	else
+	{
+		line6 = full.toString().trim();
+		full = "";
+	}
+}
+if(line6 != null && line6 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line6.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp6 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp6:";
+		info childResp6;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e6)
+	{
+		info "child create error 6:";
+		info e6;
+	}
+}
+// BLOCK 7
+line7 = "";
+if(full != null && full != "")
+{
+	i7 = full.indexOf("\n");
+	if(i7 != -1)
+	{
+		line7 = full.subString(0,i7).toString().trim();
+		full = full.subString(i7 + 1,full.length()).toString();
+	}
+	else
+	{
+		line7 = full.toString().trim();
+		full = "";
+	}
+}
+if(line7 != null && line7 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line7.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp7 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp7:";
+		info childResp7;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e7)
+	{
+		info "child create error 7:";
+		info e7;
+	}
+}
+// BLOCK 8
+line8 = "";
+if(full != null && full != "")
+{
+	i8 = full.indexOf("\n");
+	if(i8 != -1)
+	{
+		line8 = full.subString(0,i8).toString().trim();
+		full = full.subString(i8 + 1,full.length()).toString();
+	}
+	else
+	{
+		line8 = full.toString().trim();
+		full = "";
+	}
+}
+if(line8 != null && line8 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line8.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp8 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp8:";
+		info childResp8;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e8)
+	{
+		info "child create error 8:";
+		info e8;
+	}
+}
+// BLOCK 9
+line9 = "";
+if(full != null && full != "")
+{
+	i9 = full.indexOf("\n");
+	if(i9 != -1)
+	{
+		line9 = full.subString(0,i9).toString().trim();
+		full = full.subString(i9 + 1,full.length()).toString();
+	}
+	else
+	{
+		line9 = full.toString().trim();
+		full = "";
+	}
+}
+if(line9 != null && line9 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line9.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp9 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp9:";
+		info childResp9;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e9)
+	{
+		info "child create error 9:";
+		info e9;
+	}
+}
+// BLOCK 10
+line10 = "";
+if(full != null && full != "")
+{
+	i10 = full.indexOf("\n");
+	if(i10 != -1)
+	{
+		line10 = full.subString(0,i10).toString().trim();
+		full = full.subString(i10 + 1,full.length()).toString();
+	}
+	else
+	{
+		line10 = full.toString().trim();
+		full = "";
+	}
+}
+if(line10 != null && line10 != "")
+{
+	try 
+	{
+		childParts = list();
+		safeTitleC = line10.replaceAll("\"","\\\"");
+		childParts.add("\"title\":\"" + safeTitleC + "\"");
+		childParts.add("\"parentId\":\"" + parentTaskId + "\"");
+		if(projectId != null && projectId != "")
+		{
+			childParts.add("\"projectId\":\"" + projectId.replaceAll("\"","\\\"") + "\"");
+		}
+		if(dueApiString != null && dueApiString != "")
+		{
+			childParts.add("\"dueDate\":\"" + dueApiString + "\"");
+			childParts.add("\"timeZone\":\"" + timeZoneForApi + "\"");
+			if(isAllDayFlag == true)
+			{
+				childParts.add("\"isAllDay\":true");
+			}
+			else
+			{
+				childParts.add("\"isAllDay\":false");
+			}
+		}
+		childParts.add("\"priority\":" + priorityInt.toString());
+		childJson = "{";
+		fp = true;
+		for each  cp in childParts
+		{
+			if(fp == false)
+			{
+				childJson = childJson + ",";
+			}
+			childJson = childJson + cp;
+			fp = false;
+		}
+		childJson = childJson + "}";
+		info "DEBUG → child json: " + childJson;
+		childResp10 = invokeurl
+		[
+			url :baseUrl + "/task"
+			type :POST
+			body:childJson
+			headers:{"Content-Type":"application/json"}
+			connection:"ticktick_oauth"
+		];
+		info "childResp10:";
+		info childResp10;
+		createdSubCount = createdSubCount + 1;
+	}
+	catch (e10)
+	{
+		info "child create error 10:";
+		info e10;
+	}
+}
+// 7) Determine final project id/name for DB
+finalProjectId = "";
+finalProjectName = "";
+if(projectId == null || projectId == "")
+{
+	if(returnedProjectId != null && returnedProjectId != "")
+	{
+		finalProjectId = returnedProjectId;
+	}
+	else
+	{
+		finalProjectId = "";
+	}
+	finalProjectName = "Inbox / Default";
+}
+else
+{
+	finalProjectId = projectId;
+	if(projectName != null && projectName != "")
+	{
+		finalProjectName = projectName;
+	}
+	else
+	{
+		finalProjectName = "Unknown Project";
+	}
+	if(returnedProjectId != null && returnedProjectId != "" && returnedProjectId != finalProjectId)
+	{
+		finalProjectId = returnedProjectId;
+	}
+}
+// 8) Build taskmeta
+metaText = "";
+metaText = metaText + "Description: ";
+if(desc != null && desc != "")
+{
+	metaText = metaText + desc;
+}
+metaText = metaText + "\n";
+metaText = metaText + "Due: ";
+if(dueApiString != null && dueApiString != "")
+{
+	metaText = metaText + dueApiString;
+}
+metaText = metaText + "\n";
+metaText = metaText + "Reminders: ";
+if(reminderList.size() > 0)
+{
+	metaText = metaText + reminderList.toString();
+}
+metaText = metaText + "\n";
+metaText = metaText + "Subtasks:\n";
+if(subtasksText != null && subtasksText != "")
+{
+	metaText = metaText + subtasksText;
+}
+// 9) Insert into tickflowdb (only the 6 fields)
+uidStr = user.get("id");
+userIdNum = 0;
+if(uidStr != null && uidStr != "")
+{
+	userIdNum = uidStr.toLong();
+}
+insertValues = Map();
+insertValues.put("projectid",finalProjectId);
+insertValues.put("userid",userIdNum);
+insertValues.put("taskid",parentTaskId);
+insertValues.put("tasktitle",taskTitle);
+insertValues.put("projectname",finalProjectName);
+insertValues.put("taskmeta",metaText);
+info "tickflowcreatetasksubmit → values to insert to tickflowdb:";
+info insertValues;
+dbResp = zoho.cliq.createRecord("tickflowdb",insertValues);
+info "tickflowcreatetasksubmit → tickflowdb response:";
+info dbResp;
+// 10) Final reply
+reply = "✅ Task created in TickTick & stored in TickFlow\n";
+reply = reply + "*Title*: " + taskTitle + "\n";
+projectToShow = "Inbox";
+if(finalProjectName != null && finalProjectName != "")
+{
+	projectToShow = finalProjectName;
+}
+reply = reply + "*Project*: " + projectToShow + "\n";
+if(dueApiString != null && dueApiString != "")
+{
+	reply = reply + "*Due*: " + dueApiString + "\n";
+}
+reply = reply + "Subtasks created in TickTick: " + createdSubCount.toString() + " (cap 10). Full list stored in DB.\n";
+if(reminderList.size() > 0)
+{
+	reply = reply + "Reminder: set\n";
+}
+return {"text":reply};
+

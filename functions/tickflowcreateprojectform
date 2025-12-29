@@ -1,0 +1,10 @@
+
+// FUNCTION: tickflowcreateprojectform
+// Called from widget "New Project" button
+inputs = list();
+// Project name input
+inputs.add({"label":"Project Name","name":"projectname","placeholder":"Enter project name","min_length":"1","max_length":"100","mandatory":true,"type":"text"});
+// Build form
+form = {"type":"form","title":"Create TickFlow Project","name":"tickflowcreateproject","button_label":"Create","hint":"This will create a project in TickTick and store it in TickFlow.","inputs":inputs,"action":{"type":"invoke.function","name":"tickflowcreateprojectsubmit"}};
+return form;
+

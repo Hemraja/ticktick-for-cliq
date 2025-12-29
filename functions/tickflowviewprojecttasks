@@ -1,0 +1,126 @@
+
+// FUNCTION: tickflowviewprojecttasks
+// TYPE: Widget Button Function
+// Triggered from "View Tasks" button on a project card
+// -> The breadcrumb/back button is placed in the header (top-left)
+tabs = {{"label":"Projects","id":"projects"},{"label":"Tasks","id":"tasks"}};
+header = Map();
+footer = Map();
+sections = list();
+// ---------- HEADER (Top-left breadcrumb/back + refresh) ----------
+header.put("title","TickFlow – Project Tasks");
+header.put("navigation","continue");
+// -------------------------------------------------------------------
+/* 1️⃣ Get projectId from target */
+projectId = "";
+if(target != null && target.containKey("id"))
+{
+	projectId = target.get("id");
+}
+if(projectId == null || projectId == "")
+{
+	// return a simple error applet (projects tab)
+	return {"type":"applet","tabs":tabs,"active_tab":"projects","header":{"title":"TickFlow – Projects","navigation":"new"},"sections":{{"id":1,"elements":{{"type":"activity","title":"No project id 🤔","description":"Could not identify which project to show tasks for."}}}},"footer":footer};
+}
+/* 2️⃣ Get current user id as string */
+uidStr = user.get("id");
+/* 3️⃣ Find project name from tickflowprojects */
+projName = "Unknown Project";
+projQuery = Map();
+projQuery.put("criteria","userid == " + uidStr);
+projDb = zoho.cliq.getRecords("tickflowprojects",projQuery);
+info "tickflowviewprojecttasks → tickflowprojects:";
+info projDb;
+if(projDb != null && projDb.get("status") == "SUCCESS" && projDb.get("list") != null)
+{
+	for each  rec in projDb.get("list")
+	{
+		if(rec.containKey("projectid") && rec.get("projectid") == projectId)
+		{
+			if(rec.containKey("projectname") && rec.get("projectname") != null)
+			{
+				projName = rec.get("projectname");
+			}
+			break;
+		}
+	}
+}
+/* 4️⃣ Fetch this user's tasks and filter by projectId */
+taskQuery = Map();
+taskQuery.put("criteria","userid == " + uidStr);
+taskDb = zoho.cliq.getRecords("tickflowdb",taskQuery);
+info "tickflowviewprojecttasks → tickflowdb:";
+info taskDb;
+tasksForProject = list();
+if(taskDb != null && taskDb.get("status") == "SUCCESS" && taskDb.get("list") != null)
+{
+	for each  tRec in taskDb.get("list")
+	{
+		if(tRec.containKey("projectid") && tRec.get("projectid") == projectId)
+		{
+			tasksForProject.add(tRec);
+		}
+	}
+}
+/* 6️⃣ Build sections / cards (no in-content crumb row — header has the breadcrumb) */
+elements = list();
+if(tasksForProject.size() == 0)
+{
+	elements.add({"type":"activity","title":"No tasks in this project yet 💤","description":"Use the “New Task” button or /tickaddtask to create tasks for *" + projName + "*.","image_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+}
+else
+{
+	elements.add({"type":"title","text":"✅ Tasks in *" + projName + "*"});
+	elements.add({"type":"divider"});
+	cardlist = list();
+	for each  tRec in tasksForProject
+	{
+		tname = tRec.get("tasktitle");
+		if(tname == null || tname == "")
+		{
+			tname = "untitled task";
+		}
+		if(tname.length() > 60)
+		{
+			tname = tname.subString(0,57) + "...";
+		}
+		tid = tRec.get("taskid");
+		// Optional: description or meta info if you store it
+		desc = "";
+		if(tRec.containKey("description") && tRec.get("description") != null)
+		{
+			desc = tRec.get("description");
+		}
+		if(desc == "")
+		{
+			desc = "Click Complete to mark done in TickTick.";
+		}
+		// Buttons for each task (Complete / Delete)
+		btns = list();
+		cb = Map();
+		cb.put("label","Complete");
+		cb.put("type","invoke.function");
+		cb.put("name","tickflowcompletetask");
+		cb.put("id",tid);
+		cb.put("emotion","positive");
+		btns.add(cb);
+		db = Map();
+		db.put("label","Delete");
+		db.put("type","invoke.function");
+		db.put("name","tickflowdeleted");
+		db.put("id",tid);
+		db.put("emotion","negative");
+		btns.add(db);
+		card = Map();
+		card.put("title","• " + tname);
+		card.put("description",desc);
+		card.put("buttons",btns);
+		cardlist.add(card);
+	}
+	elements.add({"type":"cards","data":cardlist,"style":{"view":"gallery","size":"medium"}});
+}
+/* assemble section */
+sections.add({"id":1,"elements":elements});
+/* 7️⃣ Return applet focused on Projects tab (header contains the top-left breadcrumb/back) */
+return {"type":"applet","tabs":tabs,"active_tab":"projects","header":header,"sections":sections,"footer":footer};
+

@@ -1,0 +1,71 @@
+
+// FUNCTION: tickflowviewtaskdetailsform
+// TYPE   : Widget Button Function
+// Shows a form with dropdown of tasks for this user
+uidStr = user.get("id");
+// 1) Load tasks from tickflowdb for this user
+options = list();
+query = Map();
+query.put("criteria","userid == " + uidStr);
+tdb = zoho.cliq.getRecords("tickflowdb",query);
+if(tdb != null && tdb.containKey("status") && tdb.get("status") == "SUCCESS" && tdb.containKey("list") && tdb.get("list") != null)
+{
+	taskList = tdb.get("list");
+	for each  row in taskList
+	{
+		if(row.containKey("taskid") && row.get("taskid") != null)
+		{
+			tid = row.get("taskid").toString();
+			tname = "";
+			if(row.containKey("tasktitle") && row.get("tasktitle") != null)
+			{
+				tname = row.get("tasktitle").toString();
+			}
+			if(tname == "")
+			{
+				tname = tid;
+			}
+			opt = Map();
+			opt.put("label",tname);
+			opt.put("value",tid);
+			options.add(opt);
+		}
+	}
+}
+// 2) Build inputs list
+inputs = list();
+// Task select (⚠ placeholder required)
+taskInput = Map();
+taskInput.put("label","Task");
+taskInput.put("name","task");
+taskInput.put("type","select");
+taskInput.put("multiple",false);
+taskInput.put("mandatory",true);
+taskInput.put("placeholder","Choose a task");
+// ✅ fix
+taskInput.put("options",options);
+inputs.add(taskInput);
+// Read-only note field
+noteInput = Map();
+noteInput.put("label","Note");
+noteInput.put("name","note");
+noteInput.put("type","textarea");
+noteInput.put("mandatory",false);
+noteInput.put("disabled",true);
+noteInput.put("placeholder","");
+noteInput.put("value","Choose a task and click *View Details* to get full info in chat.");
+inputs.add(noteInput);
+// 3) Build form object
+formObj = Map();
+formObj.put("type","form");
+formObj.put("title","View Task Details");
+formObj.put("name","tickflowviewtaskdetailsform");
+formObj.put("button_label","View Details");
+formObj.put("trigger_on_cancel",true);
+actionMap = Map();
+actionMap.put("type","invoke.function");
+actionMap.put("name","tickflowviewtaskdetailssubmit");
+formObj.put("action",actionMap);
+formObj.put("inputs",inputs);
+return formObj;
+

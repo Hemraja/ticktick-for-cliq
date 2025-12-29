@@ -1,0 +1,89 @@
+
+// FUNCTION: tickflowedittaskform
+// TYPE: Widget Button Function
+taskId = "";
+if(target != null && target.containKey("id"))
+{
+	taskId = target.get("id");
+}
+if(taskId == null || taskId == "")
+{
+	return {"text":"⚠️ No task id to edit."};
+}
+uidStr = user.get("id");
+// Fetch task row from DB by userid, then taskid in code
+query = Map();
+query.put("criteria","userid == " + uidStr);
+db = zoho.cliq.getRecords("tickflowdb",query);
+taskTitle = "";
+projectId = "";
+projectName = "";
+desc = "";
+dueText = "";
+remText = "";
+subtasksText = "";
+if(db != null && db.get("status") == "SUCCESS" && db.get("list") != null)
+{
+	for each  rec in db.get("list")
+	{
+		if(rec.containKey("taskid") && rec.get("taskid") == taskId)
+		{
+			if(rec.containKey("tasktitle") && rec.get("tasktitle") != null)
+			{
+				taskTitle = rec.get("tasktitle");
+			}
+			if(rec.containKey("projectid") && rec.get("projectid") != null)
+			{
+				projectId = rec.get("projectid");
+			}
+			if(rec.containKey("projectname") && rec.get("projectname") != null)
+			{
+				projectName = rec.get("projectname");
+			}
+			if(rec.containKey("description") && rec.get("description") != null)
+			{
+				desc = rec.get("description");
+			}
+			if(rec.containKey("duedate") && rec.get("duedate") != null)
+			{
+				dueText = rec.get("duedate");
+			}
+			if(rec.containKey("reminders") && rec.get("reminders") != null)
+			{
+				remText = rec.get("reminders");
+			}
+			if(rec.containKey("subtasks") && rec.get("subtasks") != null)
+			{
+				subtasksText = rec.get("subtasks");
+			}
+			break;
+		}
+	}
+}
+if(taskTitle == "")
+{
+	taskTitle = "Untitled task";
+}
+// Build edit form
+form = Map();
+form.put("type","form");
+form.put("title","Edit Task");
+form.put("name","tickflowedittask");
+form.put("button_label","Save");
+inputs = list();
+// Task title
+inputs.add({"label":"Task Title","name":"tasktitle","type":"text","mandatory":true,"placeholder":"New Task Title","value":taskTitle});
+// Description (large text)
+inputs.add({"label":"Description","name":"description","type":"textarea","mandatory":false,"placeholder":"Write anything","value":desc});
+// Due date (free text for now – you can format it later)
+inputs.add({"label":"Due Date","name":"duedate","type":"text","mandatory":false,"placeholder":"Choose the Date and time","value":dueText});
+// Reminders (free text meta)
+// Subtasks (one per line etc)
+// Hidden fields
+inputs.add({"name":"taskid","type":"hidden","value":taskId});
+inputs.add({"name":"projectid","type":"hidden","value":projectId});
+form.put("inputs",inputs);
+// Submit handler
+form.put("action",{"type":"invoke.function","name":"tickflowedittasksubmit"});
+return form;
+

@@ -1,0 +1,114 @@
+
+// FUNCTION: tickflowdeleteproject
+// Type: Widget Button Function
+baseUrl = "https://api.ticktick.com/open/v1";
+// 1️⃣ Get projectId from the button
+projectId = "";
+if(target != null && target.containKey("id"))
+{
+	projectId = target.get("id");
+}
+if(projectId == null || projectId == "")
+{
+	return {"text":"⚠️ No project id provided to delete."};
+}
+// 2️⃣ Get current user id (same way you use in widget)
+uidStr = user.get("id");
+// this works in your widget criteria
+//------------------------------------------------------
+// 3️⃣ Try to get project name from tickflowprojects first
+//------------------------------------------------------
+projName = "";
+projQuery = Map();
+projQuery.put("criteria","userid == " + uidStr);
+projDb = zoho.cliq.getRecords("tickflowprojects",projQuery);
+info "tickflowdeleteproject → tickflowprojects (by userid only):";
+info projDb;
+if(projDb != null && projDb.get("status") == "SUCCESS" && projDb.get("list") != null)
+{
+	for each  rec in projDb.get("list")
+	{
+		if(rec.containKey("projectid") && rec.get("projectid") == projectId)
+		{
+			if(rec.containKey("projectname"))
+			{
+				projName = rec.get("projectname");
+			}
+		}
+	}
+}
+//------------------------------------------------------
+// 4️⃣ Delete project from TickTick
+//------------------------------------------------------
+try 
+{
+	deleteResp = invokeurl
+	[
+		url :baseUrl + "/project/" + projectId
+		type :DELETE
+		connection:"ticktick_oauth"
+	];
+	info "tickflowdeleteproject → TickTick deleteResp:";
+	info deleteResp;
+}
+catch (e)
+{
+	info "tickflowdeleteproject → Error deleting project from TickTick:";
+	info e;
+	// continue to clean DB anyway
+}
+//------------------------------------------------------
+// 5️⃣ Delete matching records from tickflowprojects DB
+//------------------------------------------------------
+if(projDb != null && projDb.get("status") == "SUCCESS" && projDb.get("list") != null)
+{
+	for each  rec in projDb.get("list")
+	{
+		if(rec.containKey("projectid") && rec.get("projectid") == projectId)
+		{
+			recId = rec.get("id");
+			delResp = zoho.cliq.deleteRecord("tickflowprojects",recId);
+			info "tickflowdeleteproject → deleted tickflowprojects recId: " + recId;
+			info delResp;
+		}
+	}
+}
+else
+{
+	info "tickflowdeleteproject → No rows fetched from tickflowprojects.";
+}
+//------------------------------------------------------
+// 6️⃣ Delete tasks for that project from tickflowdb
+//------------------------------------------------------
+taskQuery = Map();
+taskQuery.put("criteria","userid == " + uidStr);
+taskDb = zoho.cliq.getRecords("tickflowdb",taskQuery);
+info "tickflowdeleteproject → tickflowdb (by userid only):";
+info taskDb;
+if(taskDb != null && taskDb.get("status") == "SUCCESS" && taskDb.get("list") != null)
+{
+	for each  tRec in taskDb.get("list")
+	{
+		if(tRec.containKey("projectid") && tRec.get("projectid") == projectId)
+		{
+			tRecId = tRec.get("id");
+			tDelResp = zoho.cliq.deleteRecord("tickflowdb",tRecId);
+			info "tickflowdeleteproject → deleted tickflowdb recId: " + tRecId;
+			info tDelResp;
+		}
+	}
+}
+else
+{
+	info "tickflowdeleteproject → No rows fetched from tickflowdb.";
+}
+//------------------------------------------------------
+// 7️⃣ Reply
+//------------------------------------------------------
+msg = "🗑️ Project deleted.";
+if(projName != null && projName != "")
+{
+	msg = "🗑️ Project deleted: *" + projName + "*";
+}
+return {"text":msg};
+

@@ -1,0 +1,61 @@
+
+// FORM SUBMIT HANDLER: tickflowcreateprojectsubmit
+response = Map();
+baseurl = "https://api.ticktick.com/open/v1";
+try 
+{
+	formvalues = form.get("values");
+	projectname = formvalues.get("projectname");
+	if(projectname == null || projectname.trim() == "")
+	{
+		response.put("text","⚠️ Project name cannot be empty.");
+		return response;
+	}
+	// 1️⃣ Create project in TickTick
+	projectbody = Map();
+	projectbody.put("name",projectname);
+	projectbody.put("viewMode","list");
+	projectbody.put("kind","TASK");
+	projectresp = invokeurl
+	[
+		url :baseurl + "/project"
+		type :POST
+		parameters:projectbody.toString()
+		headers:{"Content-Type":"application/json"}
+		connection:"ticktick_oauth"
+	];
+	info "TickTick create project response ===>";
+	info projectresp;
+	createdprojectid = projectresp.get("id");
+	createdprojectname = projectresp.get("name");
+	if(createdprojectid == null || createdprojectid == "")
+	{
+		response.put("text","❌ TickTick project creation failed (no id).");
+		return response;
+	}
+	// 2️⃣ Store in tickflowprojects DB
+	values = Map();
+	useridraw = user.get("id");
+	useridnum = 0;
+	if(useridraw != null)
+	{
+		useridnum = useridraw.toLong();
+	}
+	values.put("userid",useridnum);
+	values.put("projectid",createdprojectid);
+	values.put("projectname",createdprojectname);
+	dbresp = zoho.cliq.createRecord("tickflowprojects",values);
+	info "tickflowprojects createRecord response ===>";
+	info dbresp;
+	msg = "✅ Project created successfully\n";
+	msg = msg + "*Name*: " + createdprojectname;
+	response.put("text",msg);
+}
+catch (e)
+{
+	info "Exception in tickflowcreateprojectsubmit ===>";
+	info e;
+	response.put("text","❌ Error creating project. Check TickTick OAuth / DB.");
+}
+return response;
+

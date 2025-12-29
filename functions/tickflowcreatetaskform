@@ -1,0 +1,105 @@
+
+// WIDGET BUTTON FUNCTION: tickflowcreatetaskform
+// Returns a form where Project is mandatory (populated from tickflowprojects DB)
+opts = list();
+// fetch projects for this user
+query = Map();
+query.put("criteria","userid == " + user.get("id"));
+pdb = zoho.cliq.getRecords("tickflowprojects",query);
+if(pdb != null && pdb.containKey("status") && pdb.get("status") == "SUCCESS" && pdb.containKey("list") && pdb.get("list") != null)
+{
+	plist = pdb.get("list");
+	for each  pr in plist
+	{
+		pname = "";
+		pid = "";
+		if(pr.containKey("projectname") && pr.get("projectname") != null)
+		{
+			pname = pr.get("projectname").toString();
+		}
+		if(pr.containKey("projectid") && pr.get("projectid") != null)
+		{
+			pid = pr.get("projectid").toString();
+		}
+		if(pid != "" && pname != "")
+		{
+			opt = Map();
+			opt.put("label",pname);
+			opt.put("value",pid);
+			opts.add(opt);
+		}
+	}
+}
+// If user has no projects in DB, show a single "Inbox" option so form still works
+if(opts.size() == 0)
+{
+	opt0 = Map();
+	opt0.put("label","Inbox (no projects)");
+	opt0.put("value","");
+	opts.add(opt0);
+}
+reminderOptions = list();
+r0 = Map();
+r0.put("label","None");
+r0.put("value","none");
+reminderOptions.add(r0);
+r1 = Map();
+r1.put("label","At due");
+r1.put("value","at_due");
+reminderOptions.add(r1);
+r2 = Map();
+r2.put("label","1 hour before");
+r2.put("value","one_hour_before");
+reminderOptions.add(r2);
+r3 = Map();
+r3.put("label","1 day before");
+r3.put("value","one_day_before");
+reminderOptions.add(r3);
+// ---------- NEW: Priority options ----------
+priorityOptions = list();
+p0 = Map();
+p0.put("label","None");
+p0.put("value","none");
+priorityOptions.add(p0);
+p1 = Map();
+p1.put("label","Low");
+p1.put("value","low");
+priorityOptions.add(p1);
+p2 = Map();
+p2.put("label","Medium");
+p2.put("value","medium");
+priorityOptions.add(p2);
+p3 = Map();
+p3.put("label","High");
+p3.put("value","high");
+priorityOptions.add(p3);
+// ------------------------------------------------
+// Build form inputs
+inputs = list();
+// Task title
+inputs.add({"label":"Task Title","name":"tasktitle","type":"text","mandatory":true,"placeholder":"Enter task title"});
+// Project select (mandatory)
+inputs.add({"label":"Project","name":"project","type":"select","multiple":false,"mandatory":true,"placeholder":"Choose a project","options":opts});
+// Description
+inputs.add({"label":"Description","name":"description","type":"textarea","mandatory":false,"placeholder":"Optional task description"});
+// Due date (user-friendly)
+inputs.add({"label":"Due Date","name":"duedate","type":"datetime","mandatory":false,"placeholder":"Choose date and time "});
+// Reminders (raw TickTick reminder string)
+inputs.add({"type":"select","name":"reminders","label":"Reminder","placeholder":"Select reminder","options":reminderOptions,"mandatory":false});
+// <-- Priority field inserted here -->
+inputs.add({"label":"Priority","name":"priority","type":"select","multiple":false,"mandatory":false,"placeholder":"Choose priority","options":priorityOptions});
+// Subtasks (one per line)
+inputs.add({"label":"Subtasks","name":"subtasks","type":"textarea","mandatory":false,"placeholder":"One subtask per line"});
+formObj = Map();
+formObj.put("type","form");
+formObj.put("title","New TickFlow Task");
+formObj.put("name","tickflowcreatetask");
+formObj.put("button_label","Create Task");
+formObj.put("trigger_on_cancel",true);
+actionMap = Map();
+actionMap.put("type","invoke.function");
+actionMap.put("name","tickflowcreatetasksubmit");
+formObj.put("action",actionMap);
+formObj.put("inputs",inputs);
+return formObj;
+

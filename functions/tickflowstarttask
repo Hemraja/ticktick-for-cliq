@@ -1,0 +1,166 @@
+
+// FUNCTION: tickflowstarttask
+// Sets starttime = 1 in tickflowdb
+// Updates TickTick startDate
+// Updates OR Creates record in ticktickcompletestartdue table
+baseUrl = "https://api.ticktick.com/open/v1";
+//---------------------------------------
+// 1) Get taskId
+//---------------------------------------
+taskId = if(target != null && target.containKey("id") && target.get("id") != null,target.get("id").toString(),"");
+if(taskId == "")
+{
+	return {"text":"⚠️ No task id provided."};
+}
+//---------------------------------------
+// 2) Get userId
+//---------------------------------------
+uidStr = if(user != null && user.containKey("id") && user.get("id") != null,user.get("id").toString(),"");
+if(uidStr == "")
+{
+	return {"text":"⚠️ Unable to read user id."};
+}
+//---------------------------------------
+// 3) Fetch tickflowdb
+//---------------------------------------
+query = {"criteria":"userid == " + uidStr};
+dbResp = zoho.cliq.getRecords("tickflowdb",query);
+recList = if(dbResp != null && dbResp.get("status") == "SUCCESS" && dbResp.get("list") != null,dbResp.get("list"),list());
+//---------------------------------------
+// 4) Find record for taskId
+//---------------------------------------
+foundRecId = "";
+recObj = Map();
+projectId = "";
+for each  rec in recList
+{
+	if(rec.containKey("taskid") && rec.get("taskid") != null && rec.get("taskid").toString() == taskId)
+	{
+		foundRecId = rec.get("id").toString();
+		recObj = rec;
+		if(rec.containKey("projectid") && rec.get("projectid") != null)
+		{
+			projectId = rec.get("projectid").toString();
+		}
+		break;
+	}
+}
+if(foundRecId == "")
+{
+	return {"text":"❌ Task not found in database."};
+}
+if(projectId == "")
+{
+	return {"text":"❌ Project ID missing for this task."};
+}
+//---------------------------------------
+// 6) Generate StartDate (ISO)
+//---------------------------------------
+now = zoho.currenttime;
+startISO = now.toString("yyyy-MM-dd'T'HH:mm:ssZ");
+//---------------------------------------
+// 7) Update TickTick API
+//---------------------------------------
+bodyMap = Map();
+bodyMap.put("id",taskId);
+bodyMap.put("projectId",projectId);
+bodyMap.put("startDate",startISO);
+apiSuccess = true;
+try 
+{
+	apiResp = invokeurl
+	[
+		url :baseUrl + "/task/" + taskId
+		type :POST
+		body:bodyMap.toString()
+		headers:{"Content-Type":"application/json"}
+		connection:"ticktick_oauth"
+	];
+}
+catch (e)
+{
+	info "TickTick update failed:";
+	info e;
+	apiSuccess = false;
+}
+//---------------------------------------
+// 8) Update DB starttime = 1
+//---------------------------------------
+try 
+{
+	zoho.cliq.updateRecord("tickflowdb",foundRecId,{"starttime":1});
+}
+catch (e2)
+{
+	info e2;
+	return {"text":"⚠️ Could not update starttime in DB."};
+}
+//---------------------------------------
+// 9) Update OR Create in ticktickcompletestartdue
+//---------------------------------------
+// check if record exists
+q2 = {"criteria":"userid == " + uidStr + " && taskid == \"" + taskId + "\""};
+db2 = zoho.cliq.getRecords("ticktickcompletestartdue",q2);
+exists = false;
+recId2 = "";
+if(db2 != null && db2.get("status") == "SUCCESS" && db2.get("list") != null && db2.get("list").size() > 0)
+{
+	exists = true;
+	recId2 = db2.get("list").get(0).get("id").toString();
+}
+// get projecttask field value
+projName = if(recObj.containKey("projectname") && recObj.get("projectname") != null,recObj.get("projectname").toString(),"Inbox");
+taskName = if(recObj.containKey("tasktitle") && recObj.get("tasktitle") != null,recObj.get("tasktitle").toString(),"Untitled");
+projecttaskStr = projName + " / " + taskName;
+// get duedate
+dueTxt = if(recObj.containKey("duedate") && recObj.get("duedate") != null,recObj.get("duedate").toString(),"");
+//---------------------------------------
+// UPDATE
+//---------------------------------------
+if(exists)
+{
+	try 
+	{
+		upd2 = {"startdate":startISO};
+		zoho.cliq.updateRecord("ticktickcompletestartdue",recId2,upd2);
+	}
+	catch (e_upd)
+	{
+		info "UPDATE failed:";
+		info e_upd;
+	}
+}
+else
+{
+	//---------------------------------------
+	// CREATE
+	//---------------------------------------
+	vals = Map();
+	vals.put("userid",uidStr.toLong());
+	vals.put("taskid",taskId);
+	vals.put("startdate",startISO);
+	vals.put("projecttask",projecttaskStr);
+	vals.put("duedate",dueTxt);
+	vals.put("completeddate","");
+	try 
+	{
+		zoho.cliq.createRecord("ticktickcompletestartdue",vals);
+	}
+	catch (e3)
+	{
+		info "CREATE failed:";
+		info e3;
+	}
+}
+//---------------------------------------
+// 10) DONE
+//---------------------------------------
+if(apiSuccess)
+{
+	return {"text":"▶️ Task started (TickTick + DB updated)."};
+}
+else
+{
+	return {"text":"▶️ Task started (DB updated). TickTick API failed."};
+}
+

@@ -1,0 +1,166 @@
+
+// FUNCTION: tickflowcompletetask
+// Updated to match NEW ticktickcompletestartdue columns
+baseUrl = "https://api.ticktick.com/open/v1";
+//---------------------------------------
+// 1) Read taskId
+//---------------------------------------
+taskId = if(target != null && target.containKey("id") && target.get("id") != null,target.get("id").toString(),"");
+if(taskId == "")
+{
+	return {"text":"⚠️ No task id provided."};
+}
+//---------------------------------------
+// 2) Read userId
+//---------------------------------------
+uidStr = if(user != null && user.containKey("id") && user.get("id") != null,user.get("id").toString(),"");
+if(uidStr == "")
+{
+	return {"text":"⚠️ Unable to read user id."};
+}
+//---------------------------------------
+// 3) Get projectId from tickflowdb
+//---------------------------------------
+projectId = "";
+listFetch = zoho.cliq.getRecords("tickflowdb",{"criteria":"userid == " + uidStr});
+recList = if(listFetch != null && listFetch.get("status") == "SUCCESS" && listFetch.get("list") != null,listFetch.get("list"),list());
+for each  r in recList
+{
+	if(r.get("taskid") != null && r.get("taskid").toString() == taskId)
+	{
+		projectId = if(r.get("projectid") != null,r.get("projectid").toString(),"");
+		break;
+	}
+}
+if(projectId == "")
+{
+	return {"text":"❌ projectId not found in DB."};
+}
+//---------------------------------------
+// 4) Get task BEFORE completing
+//---------------------------------------
+taskInfo = null;
+try 
+{
+	taskInfo = invokeurl
+	[
+		url :baseUrl + "/project/" + projectId + "/task/" + taskId
+		type :GET
+		connection:"ticktick_oauth"
+	];
+}
+catch (ePre)
+{
+	info ePre;
+}
+// Extract fields
+taskTitle = if(taskInfo != null && taskInfo.get("title") != null,taskInfo.get("title").toString(),"Untitled");
+projectName = if(taskInfo != null && taskInfo.get("projectName") != null,taskInfo.get("projectName").toString(),"Inbox");
+dueDate = if(taskInfo != null && taskInfo.get("dueDate") != null,taskInfo.get("dueDate").toString(),"");
+//---------------------------------------
+// 5) Format due date
+//---------------------------------------
+formattedDue = "";
+if(dueDate != "")
+{
+	try 
+	{
+		dtObj = dueDate.toTime("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
+		formattedDue = dtObj.toString("dd-MMM-yyyy HH:mm:ss");
+	}
+	catch (eFmt)
+	{
+		formattedDue = dueDate;
+	}
+}
+//---------------------------------------
+// 6) TickTick COMPLETE
+//---------------------------------------
+try 
+{
+	invokeurl
+	[
+		url :baseUrl + "/project/" + projectId + "/task/" + taskId + "/complete"
+		type :POST
+		connection:"ticktick_oauth"
+	]
+}
+catch (e1)
+{
+	info e1;
+	return {"text":"❌ Failed to complete task."};
+}
+//---------------------------------------
+// 7) UPDATE OR INSERT into ticktickcompletestartdue
+//---------------------------------------
+q2 = {"criteria":"userid == " + uidStr + " && taskid == \"" + taskId + "\""};
+db2 = zoho.cliq.getRecords("ticktickcompletestartdue",q2);
+exists = if(db2 != null && db2.get("status") == "SUCCESS" && db2.get("list") != null && db2.get("list").size() > 0,true,false);
+recId2 = "";
+if(exists)
+{
+	recId2 = db2.get("list").get(0).get("id").toString();
+}
+// Build combined project-task
+projecttaskVal = projectName + " / " + taskTitle;
+//---------------------------------------
+// If exists → UPDATE completeddate + duedate
+//---------------------------------------
+if(exists)
+{
+	try 
+	{
+		upd2 = Map();
+		upd2.put("duedate",formattedDue);
+		upd2.put("completeddate",zoho.currenttime.toString());
+		zoho.cliq.updateRecord("ticktickcompletestartdue",recId2,upd2);
+	}
+	catch (e_upd)
+	{
+		info e_upd;
+	}
+}
+else
+{
+	//---------------------------------------
+	// If not exists → CREATE
+	//---------------------------------------
+	vals = Map();
+	vals.put("userid",uidStr.toLong());
+	vals.put("taskid",taskId);
+	vals.put("startdate","");
+	// Not started case
+	vals.put("projecttask",projecttaskVal);
+	vals.put("duedate",formattedDue);
+	vals.put("completeddate",zoho.currenttime.toString());
+	try 
+	{
+		zoho.cliq.createRecord("ticktickcompletestartdue",vals);
+	}
+	catch (e3)
+	{
+		info e3;
+	}
+}
+//---------------------------------------
+// 8) DELETE task from tickflowdb
+//---------------------------------------
+for each  r in recList
+{
+	if(r.get("taskid") != null && r.get("taskid").toString() == taskId)
+	{
+		try 
+		{
+			zoho.cliq.deleteRecord("tickflowdb",r.get("id").toString());
+		}
+		catch (eDel)
+		{
+			info eDel;
+		}
+	}
+}
+//---------------------------------------
+// 9) DONE
+//---------------------------------------
+return {"text":"✅ Task completed: *" + taskTitle + "*"};
+
