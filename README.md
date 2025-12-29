@@ -1,53 +1,42 @@
-#TickTick extension for ZOHO Cliq
-TickFlow 🚀
-
+# TickFlow 🚀
 Zoho Cliq × TickTick Integration
 
-Overview
-
+## Overview
 TickFlow is a productivity automation tool that integrates TickTick with Zoho Cliq, enabling users to manage projects and tasks directly inside Zoho Cliq. It reduces context switching by bringing task workflows into team communication.
 
-Problem
+## Problem
+Teams using Zoho Cliq for communication and TickTick for task management often face fragmented workflows and missed updates. TickFlow unifies both platforms into a single workspace.
 
-Teams often use Zoho Cliq for communication and TickTick for task management, causing fragmented workflows and missed updates. TickFlow unifies both platforms into a single workspace.
+## Features
+- Project management (CRUD)
+- Task management (CRUD)
+- Support for due dates, reminders, and subtasks
+- Sync between Zoho Cliq and TickTick
+- Custom data storage using Zoho databases
+- Scalable architecture for future enhancements
 
-Features
+## Tech Stack
+- Zoho Cliq Widgets – Frontend UI
+- Zoho Deluge – Backend logic & automation
+- TickTick Open API – Task and project data
+- Zoho Custom Databases – Persistent storage
 
-Project management (CRUD)
+## Architecture
+Zoho Cliq Widget → Deluge Functions → TickTick API  
+↳ Data stored in custom databases (`tickflowprojects`, `tickflowdb`)
 
-Task management (CRUD)
+## Use Cases
+- Teams managing tasks inside the Zoho ecosystem
+- Individuals who prefer chat-based task workflows
+- Automation-focused productivity systems
 
-Support for due dates, reminders, and subtasks
+## Achievements
+- 🏆 CliqTrix Hackathon – Semi Finalist
 
-Sync between Zoho Cliq and TickTick
+## Future Enhancements
+- Productivity dashboards
+- AI-powered task summaries and insights
+- Advanced analytics and reporting
 
-Custom data storage using Zoho databases
-
-Scalable architecture for future features
-
-Tech Stack
-
-Zoho Cliq Widgets – Frontend UI
-
-Zoho Deluge – Backend logic & automation
-
-TickTick Open API – Task and project data
-
-Zoho Custom Databases – Persistent storage
-
-Architecture
-
-Zoho Cliq Widget → Deluge Functions → TickTick API
-↳ Data stored in custom databases (tickflowprojects, tickflowdb)
-
-Use Cases
-
-Teams managing tasks inside Zoho ecosystem
-
-Individuals who prefer chat-based task workflows
-
-Automation-focused productivity setups
-
-Achievements
-
-🏆 CliqTrix Hackathon – Semi Finalist
+## Status
+Actively developed 🚧
