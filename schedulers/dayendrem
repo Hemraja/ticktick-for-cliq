@@ -1,0 +1,31 @@
+
+// === TickFlow End of Day Card ===
+// You can change this message anytime
+motivation = "Progress isn’t loud. It’s built silently — one task at a time.";
+// Build card payload
+payload = Map();
+botInfo = Map();
+botInfo.put("name","TickFlow Bot");
+payload.put("bot",botInfo);
+card = Map();
+card.put("title","🌙 End of Day Reflection");
+card.put("theme","modern-inline");
+payload.put("card",card);
+// Main message
+textMsg = "";
+textMsg = textMsg + "✨ *Good job today!*\n";
+textMsg = textMsg + "Whether you completed all tasks or only a few, you showed up — and that matters.\n\n";
+textMsg = textMsg + "💡 *Thought to End the Day*\n";
+textMsg = textMsg + "_" + motivation + "_\n\n";
+textMsg = textMsg + "📝 *Take a moment to review your tasks and prepare for tomorrow.*";
+payload.put("text",textMsg);
+// Send card
+try 
+{
+	zoho.cliq.postToBot("tickflow",payload);
+}
+catch (e)
+{
+	info "postToBot failed: " + e;
+}
+
