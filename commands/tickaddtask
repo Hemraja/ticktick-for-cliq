@@ -1,0 +1,123 @@
+
+response = Map();
+baseUrl = "https://api.ticktick.com/open/v1";
+if(arguments == null)
+{
+	arguments = "";
+}
+fullText = arguments.replaceFirst("/tickaddtask","").trim();
+if(fullText == null || fullText == "")
+{
+	msg = "⚠️ Usage:\n";
+	msg = msg + "/tickaddtask <Project Name> | <Task Title>\n";
+	msg = msg + "OR\n";
+	msg = msg + "/tickaddtask <Task Title>  (goes to your TickTick default inbox)";
+	response.put("text",msg);
+	return response;
+}
+projectName = "";
+taskTitle = "";
+if(fullText.contains("|"))
+{
+	sepIndex = fullText.indexOf("|");
+	projectName = fullText.subString(0,sepIndex).trim();
+	taskTitle = fullText.subString(sepIndex + 1,fullText.length()).trim();
+}
+else
+{
+	taskTitle = fullText;
+}
+if(taskTitle == "")
+{
+	msg = "⚠️ Task title is empty.\n";
+	msg = msg + "Examples:\n";
+	msg = msg + "/tickaddtask Personal | Buy groceries\n";
+	msg = msg + "/tickaddtask Buy groceries";
+	response.put("text",msg);
+	return response;
+}
+try 
+{
+	projectId = "";
+	chosenProjectName = "";
+	if(projectName != "")
+	{
+		projects = invokeurl
+		[
+			url :baseUrl + "/project"
+			type :GET
+			connection:"ticktick_oauth"
+		];
+		for each  proj in projects
+		{
+			if(proj.get("name") == projectName)
+			{
+				projectId = proj.get("id");
+				chosenProjectName = proj.get("name");
+				break;
+			}
+		}
+		if(projectId == "")
+		{
+			response.put("text","❌ Could not find a TickTick project named \"" + projectName + "\".\n" + "Make sure the name matches exactly in TickTick.");
+			return response;
+		}
+	}
+	taskBody = Map();
+	taskBody.put("title",taskTitle);
+	if(projectId != "")
+	{
+		taskBody.put("projectId",projectId);
+	}
+	taskResp = invokeurl
+	[
+		url :baseUrl + "/task"
+		type :POST
+		parameters:taskBody.toString()
+		headers:{"Content-Type":"application/json"}
+		connection:"ticktick_oauth"
+	];
+	info taskResp;
+	createdTitle = taskResp.get("title");
+	createdTaskId = taskResp.get("id");
+	createdProjectId = taskResp.get("projectId");
+	storedProjectName = chosenProjectName;
+	if(storedProjectName == "" || storedProjectName == null)
+	{
+		storedProjectName = "Inbox / Default";
+	}
+	try 
+	{
+		values = Map();
+		values.put("userid",user.get("id"));
+		values.put("projectid",createdProjectId);
+		values.put("projectname",storedProjectName);
+		values.put("taskid",createdTaskId);
+		values.put("tasktitle",createdTitle);
+		dbInsert = zoho.cliq.createRecord("tickflowdb",values);
+		info dbInsert;
+	}
+	catch (e2)
+	{
+		info "Error while storing task in tickflowdb";
+		info e2;
+	}
+	reply = "✅ Task created in TickTick\n";
+	if(projectName != "")
+	{
+		reply = reply + "Project: " + storedProjectName + "\n";
+	}
+	else
+	{
+		reply = reply + "Project: Inbox \n";
+	}
+	reply = reply + "Task: " + createdTitle;
+	response.put("text",reply);
+}
+catch (e)
+{
+	info e;
+	response.put("text","❌ Error creating task. Check TickTick OAuth connection & scope.");
+}
+return response;
+

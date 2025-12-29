@@ -1,0 +1,132 @@
+
+// Ultra-minimal Deluge-safe incoming webhook handler
+p = Map();
+if(body != null)
+{
+	try 
+	{
+		p = body.toMap();
+	}
+	catch (err_parse)
+	{
+		return {"ok":false,"error":"invalid json"};
+	}
+}
+ch = "tickflow";
+if(p.containKey("channel_unique_name"))
+{
+	tmpc = p.get("channel_unique_name");
+	if(tmpc != null)
+	{
+		ch = tmpc;
+	}
+}
+t = Map();
+if(p.containKey("task"))
+{
+	tmpt = p.get("task");
+	if(tmpt != null)
+	{
+		t = tmpt;
+	}
+}
+if(t == null || t.size() == 0)
+{
+	return {"ok":false,"error":"task missing"};
+}
+idv = "";
+if(t.containKey("id"))
+{
+	tmp = t.get("id");
+	if(tmp != null)
+	{
+		idv = tmp;
+	}
+}
+titlev = "";
+if(t.containKey("title"))
+{
+	tmp = t.get("title");
+	if(tmp != null)
+	{
+		titlev = tmp;
+	}
+}
+prv = "";
+if(t.containKey("priority"))
+{
+	tmp = t.get("priority");
+	if(tmp != null)
+	{
+		prv = tmp;
+	}
+}
+dd = "";
+if(t.containKey("duedate"))
+{
+	tmp = t.get("duedate");
+	if(tmp != null)
+	{
+		dd = tmp;
+	}
+}
+msg = "";
+msg = msg + "🆕 New Task\n";
+if(titlev != null && titlev + "" != "")
+{
+	msg = msg + "Title: " + titlev + "\n";
+}
+if(idv != null && idv + "" != "")
+{
+	msg = msg + "ID: " + idv + "\n";
+}
+if(prv != null && prv + "" != "")
+{
+	msg = msg + "Priority: " + prv + "\n";
+}
+if(dd != null && dd + "" != "")
+{
+	msg = msg + "Due: " + dd + "\n";
+}
+m = Map();
+m.put("text",msg);
+r = Map();
+try 
+{
+	r = zoho.cliq.postToChannelAsBot(ch,"tickflow",m);
+	info "post_resp: " + r.toString();
+}
+catch (err_post)
+{
+	info "post_err: " + err_post.toString();
+	return {"ok":false,"error":"post_failed"};
+}
+pmid = "";
+if(r.containKey("message_id"))
+{
+	pmid = r.get("message_id");
+}
+else
+{
+	if(r.containKey("data"))
+	{
+		dnode = r.get("data");
+		if(dnode != null)
+		{
+			if(dnode.containKey("messageid"))
+			{
+				pmid = dnode.get("messageid");
+			}
+			else if(dnode.containKey("message_id"))
+			{
+				pmid = dnode.get("message_id");
+			}
+		}
+	}
+}
+out = Map();
+out.put("ok",true);
+out.put("parent_message_id",pmid);
+out.put("posted",r);
+return out;
+

@@ -1,0 +1,35 @@
+
+response = Map();
+baseUrl = "https://api.ticktick.com/open/v1";
+try 
+{
+	userInfo = invokeurl
+	[
+		url :"https://api.ticktick.com/open/v1/user/info"
+		type :GET
+		connection:"ticktick_oauth"
+	];
+	userName = userInfo.get("username");
+	if(userName == null || userName == "")
+	{
+		userName = userInfo.get("name");
+	}
+	if(userName == null || userName == "")
+	{
+		response.put("text","✅ TickTick account is connected, but user name could not be fetched.");
+	}
+	else
+	{
+		text = "✅ TickTick connected successfully\n\n";
+		text = text + "Account: " + userName + "\n";
+		text = text + "TickFlow is now linked with Cliqtrix ✅";
+		response.put("text",text);
+	}
+}
+catch (e)
+{
+	info e;
+	response.put("text","❌ Could not connect to TickTick.\n" + "Check your connection ticktick_oauth and scopes.");
+}
+return response;
+

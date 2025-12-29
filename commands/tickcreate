@@ -1,0 +1,41 @@
+
+response = Map();
+response.put("text","Click the buttons to create Task and Project");
+bot = Map();
+bot.put("name","TickFlow");
+bot.put("image","https://img.icons8.com/fluent/1200/tick-tick.jpg");
+response.put("bot",bot);
+card = Map();
+card.put("title","Add Task and Project ");
+card.put("theme","modern-inline");
+response.put("card",card);
+// Build buttons list
+buttonsList = list();
+// --- Button 1: Task (invoke a function) ---
+btnTask = Map();
+btnTask.put("label","Task");
+taskAction = Map();
+taskAction.put("type","invoke.function");
+// call a Deluge function
+taskData = Map();
+taskData.put("name","tickflowcreatetaskorm");
+// <-- function name to call
+taskAction.put("data",taskData);
+btnTask.put("action",taskAction);
+buttonsList.add(btnTask);
+// --- Button 2: Project (invoke a function) ---
+btnProject = Map();
+btnProject.put("label","Project");
+projAction = Map();
+projAction.put("type","invoke.function");
+// call a Deluge function
+projData = Map();
+projData.put("name","tickflowcreateprojectform");
+// <-- function name to call
+projAction.put("data",projData);
+btnProject.put("action",projAction);
+buttonsList.add(btnProject);
+// Attach buttons and return
+response.put("buttons",buttonsList);
+return response;
+

@@ -1,0 +1,226 @@
+
+response = Map();
+baseUrl = "https://api.ticktick.com/open/v1";
+projectName = "";
+keyword = "";
+/* ==============================
+   ✅ 1. INPUT PARSING
+   ============================== */
+if(selections != null && selections.size() == 1)
+{
+	keyword = selections.get(0).get("title").toString().trim();
+}
+else
+{
+	if(arguments == null)
+	{
+		arguments = "";
+	}
+	fullText = arguments.replaceFirst("/ticksearch","").trim();
+	if(fullText == "")
+	{
+		response.put("text","⚠️ Usage:\n/ticksearch <keyword>\nOR\n/ticksearch <project> | <keyword>");
+		return response;
+	}
+	if(fullText.contains("|"))
+	{
+		sepIndex = fullText.indexOf("|");
+		projectName = fullText.subString(0,sepIndex).trim();
+		keyword = fullText.subString(sepIndex + 1,fullText.length()).trim();
+	}
+	else
+	{
+		keyword = fullText;
+	}
+}
+if(keyword == "")
+{
+	response.put("text","❌ Search keyword cannot be empty.");
+	return response;
+}
+/* ==============================
+   ✅ 2. SEARCH DB
+   ============================== */
+dbResp = zoho.cliq.getRecords("tickflowdb");
+records = List();
+if(dbResp != null && dbResp.containsKey("list"))
+{
+	records = dbResp.get("list");
+}
+matchedTasks = List();
+matchedProjects = Map();
+// projectId → projectName
+for each  rec in records
+{
+	if(rec.containsKey("tasktitle") && rec.containsKey("taskid") && rec.containsKey("projectid"))
+	{
+		title = rec.get("tasktitle").toString();
+		taskId = rec.get("taskid").toString();
+		projectId = rec.get("projectid").toString();
+		dbProjectName = rec.get("projectname").toString();
+		/* ✅ Task match */
+		if(title.toLowerCase().contains(keyword.toLowerCase()))
+		{
+			if(projectName == "" || dbProjectName.equalsIgnoreCase(projectName))
+			{
+				item = Map();
+				item.put("taskId",taskId);
+				item.put("projectId",projectId);
+				item.put("title",title);
+				item.put("projectName",dbProjectName);
+				matchedTasks.add(item);
+			}
+		}
+		/* ✅ Project match */
+		if(projectName == "" && dbProjectName.toLowerCase().contains(keyword.toLowerCase()))
+		{
+			matchedProjects.put(projectId,dbProjectName);
+		}
+	}
+}
+if(matchedTasks.isEmpty() && matchedProjects.isEmpty())
+{
+	response.put("text","❌ No matching tasks or projects found.");
+	return response;
+}
+/* ==============================
+   ✅ 3. PROJECT RESULT → SHOW ALL TASKS
+   ============================== */
+if(matchedProjects.size() > 0)
+{
+	reply = "📁 *Project Results:*\n\n";
+	projectIds = matchedProjects.toMap().keys();
+	for each  pId in projectIds
+	{
+		pName = matchedProjects.get(pId);
+		reply = reply + "🗂 *" + pName + "*\n";
+		try 
+		{
+			apiTasks = invokeurl
+			[
+				url :baseUrl + "/project/" + pId + "/task"
+				type :GET
+				connection:"ticktick_oauth"
+			];
+			if(apiTasks != null && apiTasks.size() > 0)
+			{
+				for each  t in apiTasks
+				{
+					if(t.containsKey("title"))
+					{
+						reply = reply + " • " + t.get("title") + "\n";
+					}
+				}
+			}
+			else
+			{
+				reply = reply + " (No tasks found)\n";
+			}
+		}
+		catch (pe)
+		{
+			reply = reply + " (Failed to load tasks)\n";
+		}
+		reply = reply + "\n";
+	}
+	response.put("text",reply);
+	return response;
+}
+/* ==============================
+   ✅ 4. TASK DETAILS (FULL API + DUE DATE + SUBTASKS)
+   ============================== */
+reply = "✅ *Task Details*\n\n";
+printedTaskIds = List();
+for each  tsk in matchedTasks
+{
+	taskId = tsk.get("taskId");
+	if(printedTaskIds.contains(taskId))
+	{
+		continue;
+	}
+	printedTaskIds.add(taskId);
+	projectId = tsk.get("projectId");
+	title = tsk.get("title");
+	dbProjectName = tsk.get("projectName");
+	try 
+	{
+		taskApiResp = invokeurl
+		[
+			url :baseUrl + "/project/" + projectId + "/task/" + taskId
+			type :GET
+			connection:"ticktick_oauth"
+		];
+	}
+	catch (e1)
+	{
+		taskApiResp = null;
+	}
+	reply = reply + "📌 *Task*: " + title + "\n";
+	reply = reply + "📁 *Project*: " + dbProjectName + "\n";
+	/* ✅ DUE DATE */
+	dueText = "(none)";
+	if(taskApiResp != null && taskApiResp.containsKey("dueDate") && taskApiResp.get("dueDate") != null)
+	{
+		dueRaw = taskApiResp.get("dueDate").toString();
+		try 
+		{
+			if(dueRaw.indexOf("T") != -1 && (dueRaw.indexOf("+") != -1 || dueRaw.indexOf("-") != -1))
+			{
+				try 
+				{
+					dt = dueRaw.toTime("yyyy-MM-dd'T'HH:mm:ssZ");
+					dueText = dt.toString("dd MMM yyyy, hh:mm a") + " IST";
+				}
+				catch (eIso1)
+				{
+					dueText = dueRaw;
+				}
+			}
+			else
+			{
+				try 
+				{
+					dt2 = dueRaw.toTime("yyyy-MM-dd HH:mm");
+					dueText = dt2.toString("dd MMM yyyy, hh:mm a") + " IST";
+				}
+				catch (ePlain)
+				{
+					dueText = dueRaw;
+				}
+			}
+		}
+		catch (eFinal)
+		{
+			dueText = dueRaw;
+		}
+	}
+	reply = reply + "📅 *Due*: " + dueText + "\n";
+	/* ✅ SUBTASKS */
+	if(taskApiResp != null && taskApiResp.containsKey("items") && taskApiResp.get("items") != null)
+	{
+		subBlock = "";
+		for each  sb in taskApiResp.get("items")
+		{
+			if(sb.containsKey("title"))
+			{
+				subBlock = subBlock + "  • " + sb.get("title") + "\n";
+			}
+		}
+		if(subBlock != "")
+		{
+			reply = reply + "*Subtasks:*\n" + subBlock;
+		}
+		else
+		{
+			reply = reply + "*Subtasks:* (none)\n";
+		}
+	}
+	else
+	{
+		reply = reply + "*Subtasks:* (none)\n";
+	}
+	reply = reply + "\n----------------------\n\n";
+}
+response.put("text",reply);
+return response;
+

@@ -1,0 +1,54 @@
+
+list = List();
+/* ✅ If user has typed nothing, show a hint */
+if(arguments == null || arguments.trim() == "")
+{
+	entry = Map();
+	entry.put("title","Type to search tasks 👋");
+	entry.put("description","Start typing a task or project name");
+	list.add(entry);
+	return list;
+}
+typed = arguments.toLowerCase().trim();
+/* ✅ User ID criteria */
+uidStr = user.get("id").toString();
+query = Map();
+query.put("criteria","userid == " + uidStr);
+/* ✅ Fetch ONLY this user's tasks */
+dbResp = zoho.cliq.getRecords("tickflowdb",query);
+records = List();
+if(dbResp != null && dbResp.containsKey("list"))
+{
+	records = dbResp.get("list");
+}
+/* ✅ Build suggestions using BOTH tasktitle & projectname */
+for each  rec in records
+{
+	if(rec.containsKey("tasktitle") && rec.containsKey("taskid"))
+	{
+		title = rec.get("tasktitle").toString();
+		projectName = "";
+		if(rec.containsKey("projectname") && rec.get("projectname") != null)
+		{
+			projectName = rec.get("projectname").toString();
+		}
+		/* ✅ Match on TASK or PROJECT */
+		if(title.toLowerCase().contains(typed) || projectName.toLowerCase().contains(typed))
+		{
+			entry = Map();
+			entry.put("title",title);
+			/* ✅ Show project name under task */
+			if(projectName != "")
+			{
+				entry.put("description","Project: " + projectName);
+			}
+			else
+			{
+				entry.put("description","Tap to view full task details");
+			}
+			list.add(entry);
+		}
+	}
+}
+return list;
+

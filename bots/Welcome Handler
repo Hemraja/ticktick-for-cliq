@@ -1,0 +1,29 @@
+
+response = Map();
+card = Map();
+card.put("title","TickFlow for Zoho Cliq");
+card.put("icon","https://img.icons8.com/fluent/1200/tick-tick.jpg");
+card.put("theme","modern-inline");
+response.put("card",card);
+slidesList = list();
+slide0 = Map();
+slide0.put("type","images");
+imgList = list();
+imgList.add("https://img.icons8.com/fluent/1200/tick-tick.jpg");
+slide0.put("data",imgList);
+slidesList.add(slide0);
+response.put("slides",slidesList);
+if(newuser)
+{
+	greeting = "Hey *" + user.get("first_name") + "*! 🎉 Welcome to *TickFlow*!";
+	subtext = "Let’s get started with better task management. I’ll help you stay organized every day!. Say HI";
+	response.put("text",greeting + "\n" + subtext);
+}
+else
+{
+	greeting = "Welcome back, *" + user.get("first_name") + "*! 😎";
+	subtext = "Glad to have you again! TickFlow is ready to keep you on track.";
+	response.put("text",greeting + "\n" + subtext);
+}
+return response;
+
