@@ -1,0 +1,441 @@
+
+tabid = "projects";
+header = Map();
+footer = Map();
+sections = list();
+// Tabs definition
+tabs = {{"label":"Projects","id":"projects"},{"label":"Tasks","id":"tasks"},{"label":"Dashboard","id":"dashboard"}};
+// Decide active tab based on target
+if(target != null && target.containKey("id"))
+{
+	tabid = target.get("id");
+}
+// ---------------- HEADER PER TAB ----------------
+if(tabid == "projects")
+{
+	header = {"title":"TickFlow – Projects","navigation":"new","buttons":{{"label":"New Project","type":"invoke.function","name":"tickflowcreateprojectform","id":"fromwidget"}}};
+}
+else if(tabid == "tasks")
+{
+	header = {"title":"TickFlow – Tasks","navigation":"new","buttons":{{"label":"New Task","type":"invoke.function","name":"tickflowcreatetaskform","id":"fromwidget_newtask"},{"label":"View Task","type":"invoke.function","name":"tickflowviewtaskdetails","id":"fromwidget_viewtask"}}};
+}
+else if(tabid == "dashboard")
+{
+	header = {"title":"TickFlow – Dashboard","navigation":"new"};
+}
+else
+{
+	header = {"title":"TickFlow","navigation":"new"};
+}
+// ==================================================
+//                PROJECTS TAB
+// ==================================================
+if(tabid == "projects")
+{
+	elements = list();
+	elements.add({"type":"title","text":"📂 Your TickFlow Projects"});
+	elements.add({"type":"text","text":"Manage your TickTick projects directly from Cliq. Use the buttons on each card to view tasks, edit or delete."});
+	elements.add({"type":"buttons","buttons":{{"label":"🔄 Sync TickTick","type":"invoke.function","name":"tickflowSyncAll","id":"sync_btn_projects"}}});
+	elements.add({"type":"divider"});
+	// Fetch projects for this user from tickflowprojects
+	query = Map();
+	query.put("criteria","userid == " + user.get("id"));
+	db = zoho.cliq.getRecords("tickflowprojects",query);
+	projects = list();
+	if(db != null && db.get("status") == "SUCCESS" && db.get("list") != null)
+	{
+		projects = db.get("list");
+	}
+	if(projects.size() > 0)
+	{
+		cardlist = list();
+		for each  proj in projects
+		{
+			pname = proj.get("projectname");
+			pid = proj.get("projectid");
+			if(pname == null)
+			{
+				pname = "Untitled project";
+			}
+			if(pname.length() > 40)
+			{
+				pname = pname.subString(0,37) + "...";
+			}
+			descText = "Manage all tasks under this project.\nStored in TickFlow DB for quick access.";
+			// Buttons for each project — emotion allowed on card buttons
+			buttons = list();
+			buttons.add({"label":"View Tasks","type":"invoke.function","name":"tickflowviewprojecttasks","id":pid,"emotion":"positive"});
+			buttons.add({"label":"Delete","type":"invoke.function","name":"tickflowdeleteproject","id":pid,"emotion":"negative"});
+			card = Map();
+			card.put("title","🗂 " + pname);
+			card.put("description",descText);
+			card.put("buttons",buttons);
+			card.put("icon_url","https://img.icons8.com/fluent/1200/tick-tick.jpg");
+			cardlist.add(card);
+		}
+		elements.add({"type":"cards","data":cardlist,"style":{"view":"gallery","size":"medium"}});
+	}
+	else
+	{
+		elements.add({"type":"activity","title":"No TickFlow projects yet","description":"Use the New Project button above or the /tickproject command to create your first project.","image_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	}
+	sections.add({"id":1,"elements":elements});
+}
+// ==================================================
+//                TASKS TAB
+// ==================================================
+if(tabid == "tasks")
+{
+	elements = list();
+	elements.add({"type":"title","text":"✅ Your TickFlow Tasks"});
+	elements.add({"type":"text","text":"View tasks synced from TickTick. You can complete, edit, or delete tasks from here."});
+	elements.add({"type":"buttons","buttons":{{"label":"🔄 Sync TickTick","type":"invoke.function","name":"tickflowSyncAll","id":"sync_btn_projects"}}});
+	elements.add({"type":"divider"});
+	// Fetch tasks for this user from tickflowdb
+	query = Map();
+	query.put("criteria","userid == " + user.get("id"));
+	tdb = zoho.cliq.getRecords("tickflowdb",query);
+	tasks = list();
+	if(tdb != null && tdb.get("status") == "SUCCESS" && tdb.get("list") != null)
+	{
+		tasks = tdb.get("list");
+	}
+	if(tasks.size() > 0)
+	{
+		cardlist = list();
+		taskCount = 0;
+		for each  t in tasks
+		{
+			taskCount = taskCount + 1;
+			if(taskCount > 25)
+			{
+				break;
+			}
+			tname = t.get("tasktitle");
+			tid = t.get("taskid");
+			tprojname = t.get("projectname");
+			if(tname == null)
+			{
+				tname = "Untitled task";
+			}
+			if(tname.length() > 60)
+			{
+				tname = tname.subString(0,57) + "...";
+			}
+			if(tprojname == null || tprojname == "")
+			{
+				tprojname = "Inbox";
+			}
+			desc = "Project: " + tprojname;
+			// Show Due Date text if present (column: duedate)
+			if(t.containKey("duedate") && t.get("duedate") != null && t.get("duedate") != "")
+			{
+				desc = desc + "\nDue: " + t.get("duedate");
+			}
+			// Show reminders text if present (column: reminders)
+			if(t.containKey("reminders") && t.get("reminders") != null && t.get("reminders") != "")
+			{
+				desc = desc + "\nReminders: " + t.get("reminders");
+			}
+			// Show subtasks text if present (column: subtasks)
+			if(t.containKey("subtasks") && t.get("subtasks") != null && t.get("subtasks") != "")
+			{
+				subText = t.get("subtasks");
+				// Keep it short in the card
+				if(subText.length() > 120)
+				{
+					subText = subText.subString(0,117) + "...";
+				}
+				desc = desc + "\nSubtasks: " + subText;
+			}
+			startVal = 0;
+			if(t.containKey("starttime") && t.get("starttime") != null)
+			{
+				try 
+				{
+					startVal = t.get("starttime").toLong();
+				}
+				catch (e)
+				{
+				}
+			}
+			buttons = list();
+			if(startVal == 0)
+			{
+				buttons.add({"label":"Start","type":"invoke.function","name":"tickflowstarttask","id":tid,"emotion":"positive"});
+			}
+			else
+			{
+				buttons.add({"label":"Start Again","type":"invoke.function","name":"tickflowstarttask","id":tid,"emotion":"positive"});
+			}
+			// Removed per-card View button — using header "View Task" instead
+			// Complete button (emotion positive)
+			buttons.add({"label":"Complete","type":"invoke.function","name":"tickflowcompletetask","id":tid,"emotion":"positive"});
+			// Edit button (neutral)
+			buttons.add({"label":"Edit","type":"invoke.function","name":"tickflowedittaskform","id":tid});
+			// Delete button (emotion negative)
+			buttons.add({"label":"Delete","type":"invoke.function","name":"tickflowdeleted","id":tid,"emotion":"negative"});
+			card = Map();
+			card.put("title","• " + tname);
+			card.put("description",desc);
+			card.put("buttons",buttons);
+			card.put("icon_url","https://img.icons8.com/fluent/1200/tick-tick.jpg");
+			cardlist.add(card);
+		}
+		elements.add({"type":"cards","data":cardlist,"style":{"view":"gallery","size":"medium"}});
+	}
+	else
+	{
+		elements.add({"type":"activity","title":"No tasks yet","description":"Use the New Task button above or /tickaddtask to start adding tasks.","image_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	}
+	sections.add({"id":1,"elements":elements});
+}
+// ==================================================
+// DASHBOARD TAB — rewritten to match Cliq graph format exactly
+// ==================================================
+if(tabid == "dashboard")
+{
+	// SECTION INIT
+	elements = list();
+	elements.add({"type":"title","text":"📊 TickFlow Dashboard"});
+	elements.add({"type":"text","text":"7-day trend & performance (based on due vs completed)."});
+	elements.add({"type":"divider"});
+	elements.add({"type":"title","text":"✨ AI Productivity Insights"});
+	elements.add({"type":"text","text":"Get smart analysis of last 7 days performance."});
+	// ============================
+	// AI SECTION WITH KEY CHECK
+	// ============================
+	aiSection = list();
+	// Check key
+	qKey = {"criteria":"userid == " + user.get("id")};
+	kdb = zoho.cliq.getRecords("ticktickperplexityapikey",qKey);
+	apiKey = "";
+	if(kdb != null && kdb.get("status") == "SUCCESS" && kdb.get("list") != null && kdb.get("list").size() > 0)
+	{
+		rec = kdb.get("list").get(0);
+		if(rec.containKey("perplexitykey") && rec.get("perplexitykey") != null)
+		{
+			apiKey = rec.get("perplexitykey").toString();
+		}
+	}
+	// If NO key → show form
+	if(apiKey == "")
+	{
+		aiSection.add({"type":"text","text":"To view AI insights, add your Perplexity API key."});
+		aiSection.add({"type":"buttons","buttons":{{"label":"Add API Key","type":"invoke.function","name":"tickflowShowPPLXKeyForm","id":"pplx_form_btn"}}});
+	}
+	else
+	{
+		// Show buttons if key exists
+		btn1 = {"label":"🔮 Get AI Insights","type":"invoke.function","name":"tickflowAiInsights","id":"ai_insights_btn"};
+		btn2 = {"label":"Update API Key","type":"invoke.function","name":"tickflowShowPPLXKeyForm","id":"update_pplx_btn"};
+		aiSection.add({"type":"buttons","buttons":{btn1,btn2}});
+	}
+	aiSection.add({"type":"divider"});
+	elements.addAll(aiSection);
+	// ============================
+	// 1) FETCH DATA FROM COMPLETED DB
+	// ============================
+	q = {"criteria":"userid == " + user.get("id")};
+	r = zoho.cliq.getRecords("ticktickcompletestartdue",q);
+	rows = list();
+	if(r != null)
+	{
+		if(r.containKey("status") && r.get("status") == "SUCCESS")
+		{
+			if(r.containKey("list") && r.get("list") != null)
+			{
+				rows = r.get("list");
+			}
+		}
+	}
+	totalCompleted = rows.size();
+	info rows;
+	// ============================
+	// 2) LAST 7 DAYS RANGE
+	// ============================
+	today = zoho.currentdate;
+	last7keys = list();
+	datesList = list();
+	for each  n in {6,5,4,3,2,1,0}
+	{
+		d = today.subDay(n);
+		key = d.toString("dd-MM-yyyy");
+		last7keys.add(key);
+		datesList.add(d);
+	}
+	// init trend map
+	trendMap = Map();
+	for each  k in last7keys
+	{
+		trendMap.put(k,0);
+	}
+	// ============================
+	// 3) METRICS INIT
+	// ============================
+	totalDiffHours = 0.0;
+	fastestH = 999999.0;
+	slowestH = 0.0;
+	fastestTask = "";
+	slowestTask = "";
+	// EARLY / LATE / ON TIME counters
+	earlyCount = 0;
+	lateCount = 0;
+	onTimeCount = 0;
+	taskGraphVals = list();
+	// ============================
+	// 4) PROCESS EACH COMPLETED TASK
+	// ============================
+	for each  row in rows
+	{
+		taskname = "Untitled";
+		if(row.get("projecttask") != null)
+		{
+			taskname = row.get("projecttask").toString();
+		}
+		// ---- Parse Due Date ----
+		dueDate = null;
+		if(row.get("duedate") != null)
+		{
+			try 
+			{
+				dueDate = row.get("duedate").toTime("dd-MMM-yyyy HH:mm:ss");
+			}
+			catch (e1)
+			{
+				info e1;
+			}
+			if(dueDate == null)
+			{
+				try 
+				{
+					dueDate = row.get("duedate").toTime("dd-MMM-yyyy HH:mm");
+				}
+				catch (e2)
+				{
+				}
+			}
+		}
+		// ---- Parse Completed Date ----
+		compDate = null;
+		if(row.get("completeddate") != null)
+		{
+			try 
+			{
+				compDate = row.get("completeddate").toTime("dd-MMM-yyyy HH:mm:ss");
+			}
+			catch (e3)
+			{
+			}
+			if(compDate == null)
+			{
+				try 
+				{
+					compDate = row.get("completeddate").toTime("dd-MMM-yyyy HH:mm");
+				}
+				catch (e4)
+				{
+				}
+			}
+		}
+		if(dueDate == null || compDate == null)
+		{
+			continue;
+		}
+		// ---- Compute Difference (hrs) ----
+		diffHours = hoursBetween(compDate,dueDate);
+		diffHours = round(diffHours,2);
+		// ---- Track EARLY / LATE / ON TIME ----
+		statusLabel = "";
+		if(diffHours < 0)
+		{
+			earlyCount = earlyCount + 1;
+			statusLabel = " (Early)";
+		}
+		else if(diffHours > 0)
+		{
+			lateCount = lateCount + 1;
+			statusLabel = " (Late)";
+		}
+		else
+		{
+			onTimeCount = onTimeCount + 1;
+			statusLabel = " (On Time)";
+		}
+		totalDiffHours = totalDiffHours + diffHours;
+		// ---- Fastest Task ----
+		if(diffHours < fastestH)
+		{
+			fastestH = diffHours;
+			fastestTask = taskname + statusLabel;
+		}
+		// ---- Slowest Task ----
+		if(diffHours > slowestH)
+		{
+			slowestH = diffHours;
+			slowestTask = taskname + statusLabel;
+		}
+		// ---- Chart Label with Status ----
+		lbl = taskname;
+		if(lbl.length() > 22)
+		{
+			lbl = lbl.subString(0,19) + "...";
+		}
+		finalLabel = lbl + statusLabel;
+		// enforce 20-character hard limit
+		if(finalLabel.length() > 20)
+		{
+			finalLabel = finalLabel.substring(0,17) + "...";
+		}
+		if(taskGraphVals.size() < 20)
+		{
+			visibleValue = if(diffHours == 0,0.01,diffHours);
+			taskGraphVals.add({"label":finalLabel,"value":visibleValue});
+		}
+		// ---- Trend Counting ----
+		key = compDate.toString("dd-MM-yyyy");
+		if(trendMap.containKey(key))
+		{
+			trendMap.put(key,trendMap.get(key) + 1);
+		}
+	}
+	avgH = 0.0;
+	if(totalCompleted > 0)
+	{
+		avgH = round(totalDiffHours / totalCompleted,2);
+	}
+	// ============================
+	// 5) SUMMARY CARDS
+	// ============================
+	cards = list();
+	cards.add({"title":"📌 Completed","description":"Total: " + totalCompleted,"icon_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	cards.add({"title":"⏱ Avg Diff","description":avgH + " hrs","icon_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	cards.add({"title":"⚡ Fastest","description":fastestTask + " (" + fastestH + " hrs)","icon_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	cards.add({"title":"🐢 Slowest","description":slowestTask + " (" + slowestH + " hrs)","icon_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	// NEW: EARLY/LATE SUMMARY CARD
+	cards.add({"title":"⏳ Early vs Late","description":"Early: " + earlyCount + "\nLate: " + lateCount + "\nOn Time: " + onTimeCount,"icon_url":"https://img.icons8.com/fluent/1200/tick-tick.jpg"});
+	elements.add({"type":"cards","data":cards,"style":{"view":"gallery","size":"small"}});
+	// ============================
+	// 6) TREND GRAPH
+	// ============================
+	trendValues = list();
+	for each  k in last7keys
+	{
+		trendValues.add({"label":k,"value":trendMap.get(k)});
+	}
+	trendGraph = {"type":"graph","styles":{"preview":"trend","x_axis":{"title":"Date"},"y_axis":{"title":"Completed"}},"data":{{"category":"Last 7 Days","values":trendValues}}};
+	elements.add(trendGraph);
+	// ============================
+	// 7) TASK TIME DIFFERENCE GRAPH
+	// ============================
+	if(taskGraphVals.size() > 0)
+	{
+		timeGraph = {"type":"graph","styles":{"preview":"vertical_bar","x_axis":{"title":"Task"},"y_axis":{"title":"Hours (Late / Early)"}},"data":{{"category":"Task Time Difference","values":taskGraphVals}}};
+		elements.add(timeGraph);
+	}
+	// ADD SECTION
+	sections.add({"id":1,"elements":elements});
+}
+// ---------------- FINAL RETURN ----------------
+return {"type":"applet","tabs":tabs,"active_tab":tabid,"header":header,"sections":sections,"footer":footer};
+
